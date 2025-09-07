@@ -15,12 +15,6 @@ urlpatterns = [
     # Auth (sesión)
     path("auth/csrf/", views_auth.csrf_token),
     path("auth/register/", views_auth.auth_register),
-    path("auth/login/", views_auth.auth_login),
-    path("auth/me/", views_auth.me),
-    path("auth/logout/", views_auth.auth_logout),
-
-    # Admin: cambiar TipoDeUsuario (1=admin, 2=normal)
-    path("auth/users/<int:codigo>/tipo/", views_auth.update_user_tipo),
 
     path("", include(router.urls)),
 ]
