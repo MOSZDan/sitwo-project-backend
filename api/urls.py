@@ -12,9 +12,13 @@ urlpatterns = [
     path("db/", views.db_info),
     path("users/count/", views.users_count),
 
-    # Auth (sesión)
+    # Auth
     path("auth/csrf/", views_auth.csrf_token),
     path("auth/register/", views_auth.auth_register),
+
+    # Recuperación de contraseña
+    path("auth/password-reset/", views_auth.password_reset_request),
+    path("auth/password-reset-confirm/", views_auth.password_reset_confirm),
 
     path("", include(router.urls)),
 ]

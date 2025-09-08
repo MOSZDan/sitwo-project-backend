@@ -2,17 +2,15 @@
 from rest_framework import serializers
 from .models import Paciente
 
-# Mapeo oficial de tu catálogo:
-# 1 = administrador, 2 = paciente, 3 = recepcionista, 4 = odontologo
+ROLES = ("paciente", "odontologo", "recepcionista")
+
+# Mapea rol -> idtipousuario del catálogo (ajusta si tus IDs reales son otros)
 ROLE_TO_TU = {
-    "administrador": 1,
     "paciente": 2,
-    "recepcionista": 3,
-    "odontologo": 4,
+    "odontologo": 3,
+    "recepcionista": 4,
 }
 
-# Aceptamos estos roles en el payload (compatibles con tu FE).
-ROLES = ("paciente", "recepcionista", "odontologo", "administrador")
 
 class RegisterSerializer(serializers.Serializer):
     # Credenciales
@@ -38,13 +36,13 @@ class RegisterSerializer(serializers.Serializer):
         # Rol por defecto: paciente
         rol = (attrs.get("rol") or "paciente").strip().lower()
 
-        # Derivar idtipousuario si no viene
+        # Derivar idtipousuario si no viene (solo si tenemos mapping)
         derived_idtu = ROLE_TO_TU.get(rol)
-        if not attrs.get("idtipousuario"):
+        if not attrs.get("idtipousuario") and derived_idtu is not None:
             attrs["idtipousuario"] = derived_idtu
 
-        # Si viene idtipousuario y también rol, exigir coherencia
-        if attrs.get("idtipousuario") != derived_idtu:
+        # Si viene idtipousuario y también rol, exigir coherencia (si hay mapping)
+        if derived_idtu is not None and attrs.get("idtipousuario") != derived_idtu:
             raise serializers.ValidationError({
                 "idtipousuario": "No coincide con el rol indicado."
             })
@@ -52,17 +50,26 @@ class RegisterSerializer(serializers.Serializer):
         # Reglas por subtipo: paciente
         if rol == "paciente":
             faltan = []
-            for f in ("sexo", "direccion", "fechanacimiento", "carnetidentidad"):
-                if not attrs.get(f):
-                    faltan.append(f)
-            if faltan:
-                raise serializers.ValidationError({
-                    "detail": f"Faltan campos de paciente: {', '.join(faltan)}"
-                })
+            if not attrs.get("sexo"):
+                faltan.append("sexo")
+            if not attrs.get("direccion"):
+                faltan.append("direccion")
+            if not attrs.get("fechanacimiento"):
+                faltan.append("fechanacimiento")
+            if not attrs.get("carnetidentidad"):
+                faltan.append("carnetidentidad")
 
-            # Normaliza CI y valida lógica mínima
+            if faltan:
+                raise serializers.ValidationError(
+                    {"detail": f"Faltan campos de paciente: {', '.join(faltan)}"}
+                )
+
+            # Normaliza CI y valida unicidad
             ci = (attrs.get("carnetidentidad") or "").strip().upper()
             attrs["carnetidentidad"] = ci
+
+            if ci and Paciente.objects.filter(carnetidentidad=ci).exists():
+                raise serializers.ValidationError({"carnetidentidad": "El carnet ya existe."})
 
             # Fecha de nacimiento no futura
             from datetime import date
@@ -70,3 +77,32 @@ class RegisterSerializer(serializers.Serializer):
                 raise serializers.ValidationError({"fechanacimiento": "No puede ser futura."})
 
         return attrs
+
+
+# ============================
+# Recuperar contraseña
+# ============================
+
+class ForgotPasswordRequestSerializer(serializers.Serializer):
+    """
+    Acepta email o username/registro en un solo campo 'identifier'.
+    """
+    identifier = serializers.CharField(
+        max_length=254,
+        allow_blank=False,
+        trim_whitespace=True
+    )
+
+
+class ResetPasswordConfirmSerializer(serializers.Serializer):
+    """
+    Recibe uid + token del enlace y la nueva contraseña.
+    """
+    uid = serializers.CharField(allow_blank=False)
+    token = serializers.CharField(allow_blank=False)
+    new_password = serializers.CharField(
+        min_length=8,
+        write_only=True,
+        allow_blank=False,
+        style={"input_type": "password"}
+    )

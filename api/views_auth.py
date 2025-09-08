@@ -3,10 +3,19 @@ from typing import Optional
 
 from django.views.decorators.csrf import ensure_csrf_cookie
 from django.contrib.auth import get_user_model
+from django.contrib.auth.tokens import default_token_generator
+from django.utils.encoding import force_bytes, force_str
+from django.utils.http import urlsafe_base64_encode, urlsafe_base64_decode
+from django.core.mail import EmailMultiAlternatives
+from django.conf import settings
 from django.db import transaction, IntegrityError, DatabaseError
 
 from rest_framework import status
-from rest_framework.decorators import api_view, permission_classes, authentication_classes
+from rest_framework.decorators import (
+    api_view,
+    permission_classes,
+    authentication_classes,
+)
 from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 
@@ -65,7 +74,7 @@ def auth_register(request):
             except IntegrityError:
                 return Response({"detail": "Ya existe un usuario con ese email."}, status=status.HTTP_409_CONFLICT)
 
-            # Nombres (hasta 150 chars en Django moderno)
+            # Nombres (hasta 150 chars)
             update_fields = []
             if nombre:
                 dj_user.first_name = nombre[:150]; update_fields.append("first_name")
@@ -145,3 +154,80 @@ def auth_register(request):
         },
         status=status.HTTP_201_CREATED,
     )
+
+
+# ============================
+# Recuperación de contraseña
+# ============================
+
+@api_view(["POST"])
+@authentication_classes([])      # público
+@permission_classes([AllowAny])
+def password_reset_request(request):
+    """
+    Paso 1: Usuario envía su email -> se manda link de reset (HTML + texto)
+    """
+    email = request.data.get("email")
+    if not email:
+        return Response({"detail": "Email es requerido"}, status=status.HTTP_400_BAD_REQUEST)
+
+    try:
+        user = User.objects.get(email=email)
+    except User.DoesNotExist:
+        # No revelamos si existe
+        return Response({"detail": "Si el correo existe, se enviará un link"}, status=status.HTTP_200_OK)
+
+    # Generar token y uid
+    uid = urlsafe_base64_encode(force_bytes(user.pk))
+    token = default_token_generator.make_token(user)
+    reset_url = f"{settings.FRONTEND_URL.rstrip('/')}/reset-password?uid={uid}&token={token}"
+
+    # Enviar email HTML
+    subject = "Recuperación de contraseña - Clínica Dental"
+    text_content = f"Usa este link para cambiar tu contraseña: {reset_url}"
+    html_content = f"""
+    <p>Hola{(' ' + (user.first_name or '')) if getattr(user, 'first_name', '') else ''},</p>
+    <p>Has solicitado recuperar tu contraseña. Haz clic en el siguiente enlace para continuar:</p>
+    <p><a href="{reset_url}">{reset_url}</a></p>
+    <p>Si no solicitaste este cambio, ignora este correo.</p>
+    """
+
+    msg = EmailMultiAlternatives(
+        subject=subject,
+        body=text_content,
+        from_email=settings.DEFAULT_FROM_EMAIL,
+        to=[user.email],
+    )
+    msg.attach_alternative(html_content, "text/html")
+    msg.send()
+
+    return Response({"detail": "Si el correo existe, se enviará un link"}, status=status.HTTP_200_OK)
+
+
+@api_view(["POST"])
+@authentication_classes([])      # público
+@permission_classes([AllowAny])
+def password_reset_confirm(request):
+    """
+    Paso 2: Usuario envía uid + token + nueva contraseña
+    """
+    uid = request.data.get("uid")
+    token = request.data.get("token")
+    new_password = request.data.get("new_password")
+
+    if not (uid and token and new_password):
+        return Response({"detail": "Faltan datos"}, status=status.HTTP_400_BAD_REQUEST)
+
+    try:
+        user_id = force_str(urlsafe_base64_decode(uid))
+        user = User.objects.get(pk=user_id)
+    except (User.DoesNotExist, ValueError, TypeError):
+        return Response({"detail": "Usuario inválido"}, status=status.HTTP_400_BAD_REQUEST)
+
+    if not default_token_generator.check_token(user, token):
+        return Response({"detail": "Token inválido o expirado"}, status=status.HTTP_400_BAD_REQUEST)
+
+    user.set_password(new_password)
+    user.save()
+
+    return Response({"detail": "Contraseña actualizada correctamente"}, status=status.HTTP_200_OK)
