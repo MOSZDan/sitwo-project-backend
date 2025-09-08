@@ -53,7 +53,6 @@ CSRF_TRUSTED_ORIGINS = _csv_env(
     ],
 )
 
-
 if DEBUG:
     SESSION_COOKIE_SAMESITE = "Lax"
     CSRF_COOKIE_SAMESITE = "Lax"
@@ -71,11 +70,16 @@ SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
 # HSTS básico en prod (ajusta a tus políticas)
 SECURE_HSTS_SECONDS = 0 if DEBUG else 60 * 60 * 24 * 30  # 30 días
 
+# >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+# Evita redirección a HTTPS cuando trabajas en local (http://localhost)
+SECURE_SSL_REDIRECT = not DEBUG   # <<< añadido
+# <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+
 # ------------------------------------
 # Apps
 # ------------------------------------
 INSTALLED_APPS = [
-    "corsheaders", 
+    "corsheaders",
     "django.contrib.admin",
     "django.contrib.auth",
     "django.contrib.contenttypes",
