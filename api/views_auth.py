@@ -2,7 +2,7 @@
 from typing import Optional
 
 from django.views.decorators.csrf import ensure_csrf_cookie
-from django.contrib.auth import get_user_model, login
+from django.contrib.auth import get_user_model
 from django.db import transaction, IntegrityError
 
 from rest_framework import status
@@ -37,11 +37,11 @@ def _resolve_tipodeusuario(idtipousuario: Optional[int]) -> int:
 @permission_classes([AllowAny])
 def auth_register(request):
     """
-    Registro:
+    Registro (NO inicia sesión):
       1) Crea Django User (email como username).
       2) Crea/actualiza fila en 'usuario' (idtipousuario=2 por defecto si no envían).
       3) Crea subtipo 1-1 según 'rol' (default: paciente) y guarda datos de paciente.
-      4) Inicia sesión automáticamente (deja cookie 'sessionid').
+      -> No se crea cookie de sesión.
     Body JSON:
       {
         email, password, nombre?, apellido?, telefono?, sexo?, idtipousuario?, rol?,
@@ -127,16 +127,11 @@ def auth_register(request):
     except IntegrityError as e:
         return Response({"detail": "Error de integridad/DB.", "error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
 
-    # 4) Inicia sesión automáticamente
-    login(request, dj_user)
-    # opcional: compatibilidad con tu SessionAuth (expone email/id)
-    request.session["auth"] = {"email": email, "auth_user_id": dj_user.id}
-    request.session.save()
-
+    # Importante: SIN login (no creamos sessionid)
     return Response(
         {
             "ok": True,
-            "message": "Usuario registrado e iniciado sesión.",
+            "message": "Usuario registrado.",
             "user": {
                 "id": dj_user.id,
                 "email": email,
