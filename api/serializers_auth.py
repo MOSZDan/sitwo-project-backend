@@ -2,17 +2,8 @@
 from rest_framework import serializers
 from .models import Paciente
 
-# Mapeo oficial de tu catálogo:
-# 1 = administrador, 2 = paciente, 3 = recepcionista, 4 = odontologo
-ROLE_TO_TU = {
-    "administrador": 1,
-    "paciente": 2,
-    "recepcionista": 3,
-    "odontologo": 4,
-}
+ROLES = ("paciente", "odontologo", "recepcionista")
 
-# Aceptamos estos roles en el payload (compatibles con tu FE).
-ROLES = ("paciente", "recepcionista", "odontologo", "administrador")
 
 class RegisterSerializer(serializers.Serializer):
     # Credenciales
@@ -52,10 +43,26 @@ class RegisterSerializer(serializers.Serializer):
         # Reglas por subtipo: paciente
         if rol == "paciente":
             faltan = []
+            if not attrs.get("sexo"):
+                faltan.append("sexo")
+            if not attrs.get("direccion"):
+                faltan.append("direccion")
+            if not attrs.get("fechanacimiento"):
+                faltan.append("fechanacimiento")
+            if not attrs.get("carnetidentidad"):
+                faltan.append("carnetidentidad")
             for f in ("sexo", "direccion", "fechanacimiento", "carnetidentidad"):
                 if not attrs.get(f):
                     faltan.append(f)
             if faltan:
+                raise serializers.ValidationError(
+                    {"detail": f"Faltan campos de paciente: {', '.join(faltan)}"}
+                )
+            ci = (attrs.get("carnetidentidad") or "").strip()
+            if ci and Paciente.objects.filter(carnetidentidad=ci).exists():
+                raise serializers.ValidationError(
+                    {"carnetidentidad": "El carnet ya existe."}
+                )
                 raise serializers.ValidationError({
                     "detail": f"Faltan campos de paciente: {', '.join(faltan)}"
                 })
@@ -70,3 +77,32 @@ class RegisterSerializer(serializers.Serializer):
                 raise serializers.ValidationError({"fechanacimiento": "No puede ser futura."})
 
         return attrs
+
+
+# ============================
+# Recuperar contraseña
+# ============================
+
+class ForgotPasswordRequestSerializer(serializers.Serializer):
+    """
+    Acepta email o username/registro en un solo campo 'identifier'.
+    """
+    identifier = serializers.CharField(
+        max_length=254,
+        allow_blank=False,
+        trim_whitespace=True
+    )
+
+
+class ResetPasswordConfirmSerializer(serializers.Serializer):
+    """
+    Recibe uid + token del enlace y la nueva contraseña.
+    """
+    uid = serializers.CharField(allow_blank=False)
+    token = serializers.CharField(allow_blank=False)
+    new_password = serializers.CharField(
+        min_length=8,
+        write_only=True,
+        allow_blank=False,
+        style={"input_type": "password"}
+    )
