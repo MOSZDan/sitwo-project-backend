@@ -26,7 +26,11 @@ def _csv_env(name: str, default: list[str]) -> list[str]:
     return [x.strip() for x in raw.split(",") if x.strip()]
 
 # En prod, sobreescribe estos con variables de entorno (coma-separadas)
-ALLOWED_HOSTS = _csv_env("ALLOWED_HOSTS", ["127.0.0.1", "localhost"])
+ALLOWED_HOSTS = _csv_env("ALLOWED_HOSTS", [
+    "127.0.0.1", "localhost",
+    "sitwo-project-backend-vzq2.onrender.com"
+])
+
 
 # Frontends permitidos (Vercel u otros) para CORS
 CORS_ALLOWED_ORIGINS = _csv_env(
@@ -54,6 +58,7 @@ CSRF_TRUSTED_ORIGINS = _csv_env(
         "http://localhost:5174",
         "http://127.0.0.1:3000",
         "http://localhost:3000",
+
     ],
 )
 
