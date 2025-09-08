@@ -3,7 +3,7 @@ from typing import Optional
 
 from django.views.decorators.csrf import ensure_csrf_cookie
 from django.contrib.auth import get_user_model
-from django.db import transaction, IntegrityError
+from django.db import transaction, IntegrityError, DatabaseError
 
 from rest_framework import status
 from rest_framework.decorators import api_view, permission_classes, authentication_classes
@@ -20,15 +20,12 @@ User = get_user_model()
 @permission_classes([AllowAny])
 @ensure_csrf_cookie
 def csrf_token(request):
-    """Siembra cookie CSRF (csrftoken). Llamar antes de POST/PUT/PATCH/DELETE."""
+    """Siembra cookie CSRF (csrftoken). Útil si luego usas endpoints con sesión/CSRF."""
     return Response({"detail": "CSRF cookie set"})
 
 
 def _resolve_tipodeusuario(idtipousuario: Optional[int]) -> int:
-    """
-    Si el body trae idtipousuario, úsalo.
-    Si NO trae, usa 2 por defecto (catálogo: Paciente).
-    """
+    """Compatibilidad legacy si llegara vacío (default paciente=2)."""
     return idtipousuario if idtipousuario else 2
 
 
@@ -38,15 +35,9 @@ def _resolve_tipodeusuario(idtipousuario: Optional[int]) -> int:
 def auth_register(request):
     """
     Registro (NO inicia sesión):
-      1) Crea Django User (email como username).
-      2) Crea/actualiza fila en 'usuario' (idtipousuario=2 por defecto si no envían).
-      3) Crea subtipo 1-1 según 'rol' (default: paciente) y guarda datos de paciente.
-      -> No se crea cookie de sesión.
-    Body JSON:
-      {
-        email, password, nombre?, apellido?, telefono?, sexo?, idtipousuario?, rol?,
-        carnetidentidad?, fechanacimiento?, direccion?
-      }
+      1) Crea Django User (username=email).
+      2) Crea/actualiza fila en 'usuario' (idtipousuario según rol).
+      3) Crea subtipo 1-1 según 'rol' (default: paciente).
     """
     ser = RegisterSerializer(data=request.data)
     ser.is_valid(raise_exception=True)
@@ -56,78 +47,88 @@ def auth_register(request):
     password = data["password"]
     nombre = (data.get("nombre") or "").strip()
     apellido = (data.get("apellido") or "").strip()
-    telefono = (data.get("telefono") or "").strip()
-    sexo = (data.get("sexo") or "").strip()
+    telefono = (data.get("telefono") or "").strip() or None
+    sexo = (data.get("sexo") or "").strip() or None
 
     rol_subtipo = (data.get("rol") or "paciente").strip().lower()
-    idtu = _resolve_tipodeusuario(data.get("idtipousuario"))
+    idtu = data.get("idtipousuario") or _resolve_tipodeusuario(None)
 
-    carnetidentidad = (data.get("carnetidentidad") or "").strip()
+    carnetidentidad = (data.get("carnetidentidad") or "").strip().upper()
     fechanacimiento = data.get("fechanacimiento")
     direccion = (data.get("direccion") or "").strip()
 
     try:
         with transaction.atomic():
-            # 1) Django User
-            if User.objects.filter(username=email).exists():
+            # 1) auth_user: email único
+            try:
+                dj_user = User.objects.create_user(username=email, email=email, password=password)
+            except IntegrityError:
                 return Response({"detail": "Ya existe un usuario con ese email."}, status=status.HTTP_409_CONFLICT)
-            dj_user = User.objects.create_user(username=email, email=email, password=password)
-            if nombre or apellido:
-                dj_user.first_name = nombre[:30]
-                dj_user.last_name = apellido[:30]
-                dj_user.save(update_fields=["first_name", "last_name"])
 
-            # 2) 'usuario' base
-            defaults_usuario = {
-                "nombre": nombre or email.split("@")[0],
-                "apellido": apellido,
-                "telefono": telefono or None,
-                "sexo": sexo or None,
-                "idtipousuario_id": idtu,
-            }
+            # Nombres (hasta 150 chars en Django moderno)
+            update_fields = []
+            if nombre:
+                dj_user.first_name = nombre[:150]; update_fields.append("first_name")
+            if apellido:
+                dj_user.last_name = apellido[:150]; update_fields.append("last_name")
+            if update_fields:
+                dj_user.save(update_fields=update_fields)
+
+            # 2) 'usuario' (dominio)
             usuario, created = Usuario.objects.get_or_create(
                 correoelectronico=email,
-                defaults=defaults_usuario,
+                defaults={
+                    "nombre": nombre or email.split("@")[0],
+                    "apellido": apellido or "",
+                    "telefono": telefono,
+                    "sexo": sexo,
+                    "idtipousuario_id": idtu,
+                },
             )
             if not created:
                 changed = False
                 if usuario.idtipousuario_id != idtu:
-                    usuario.idtipousuario_id = idtu
-                    changed = True
-                for k, v in {
-                    "nombre": nombre or usuario.nombre,
-                    "apellido": apellido or usuario.apellido,
-                    "telefono": telefono or usuario.telefono,
-                    "sexo": sexo or usuario.sexo,
-                }.items():
-                    if getattr(usuario, k) != v:
-                        setattr(usuario, k, v)
-                        changed = True
+                    usuario.idtipousuario_id = idtu; changed = True
+                if nombre and usuario.nombre != nombre:
+                    usuario.nombre = nombre; changed = True
+                if apellido and usuario.apellido != apellido:
+                    usuario.apellido = apellido; changed = True
+                if telefono is not None and usuario.telefono != telefono:
+                    usuario.telefono = telefono; changed = True
+                if sexo is not None and usuario.sexo != sexo:
+                    usuario.sexo = sexo; changed = True
                 if changed:
                     usuario.save()
 
             # 3) Subtipo 1-1
             if rol_subtipo == "paciente":
-                Paciente.objects.update_or_create(
-                    codusuario=usuario,
-                    defaults={
-                        "carnetidentidad": carnetidentidad,
-                        "fechanacimiento": fechanacimiento,
-                        "direccion": direccion,
-                    },
-                )
+                try:
+                    Paciente.objects.update_or_create(
+                        codusuario=usuario,
+                        defaults={
+                            "carnetidentidad": carnetidentidad,
+                            "fechanacimiento": fechanacimiento,
+                            "direccion": direccion,
+                        },
+                    )
+                except IntegrityError:
+                    # UNIQUE(carnetidentidad) en BD
+                    return Response({"carnetidentidad": "El carnet ya existe."}, status=status.HTTP_409_CONFLICT)
             elif rol_subtipo == "odontologo":
                 Odontologo.objects.get_or_create(codusuario=usuario)
             elif rol_subtipo == "recepcionista":
                 Recepcionista.objects.get_or_create(codusuario=usuario)
+            elif rol_subtipo == "administrador":
+                # Administrador no tiene subtipo 1-1 en tu esquema actual
+                pass
             else:
-                # fallback: paciente
+                # Fallback legacy -> paciente vacío
                 Paciente.objects.get_or_create(codusuario=usuario)
 
-    except IntegrityError as e:
-        return Response({"detail": "Error de integridad/DB.", "error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
+    except DatabaseError as e:
+        return Response({"detail": "Error al registrar.", "error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
 
-    # Importante: SIN login (no creamos sessionid)
+    # Respuesta compatible con tu FE
     return Response(
         {
             "ok": True,
