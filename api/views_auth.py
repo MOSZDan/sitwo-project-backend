@@ -6,8 +6,9 @@ from django.contrib.auth import get_user_model
 from django.contrib.auth.tokens import default_token_generator
 from django.utils.encoding import force_bytes, force_str
 from django.utils.http import urlsafe_base64_encode, urlsafe_base64_decode
-from django.core.mail import EmailMultiAlternatives  # ← CAMBIO: usamos EmailMultiAlternatives
+from django.core.mail import EmailMultiAlternatives
 from django.conf import settings
+from django.db import transaction, IntegrityError, DatabaseError
 from django.db import transaction, IntegrityError
 from django.db import transaction, IntegrityError, DatabaseError
 
@@ -49,6 +50,10 @@ def auth_register(request):
       2) Crea/actualiza fila en 'usuario' (idtipousuario según rol).
       3) Crea subtipo 1-1 según 'rol' (default: paciente).
     Registro (NO inicia sesión)
+    Registro (NO inicia sesión):
+      1) Crea Django User (username=email).
+      2) Crea/actualiza fila en 'usuario' (idtipousuario según rol).
+      3) Crea subtipo 1-1 según 'rol' (default: paciente).
     """
     ser = RegisterSerializer(data=request.data)
     ser.is_valid(raise_exception=True)
@@ -83,6 +88,11 @@ def auth_register(request):
                 dj_user.first_name = nombre[:30]
                 dj_user.last_name = apellido[:30]
                 dj_user.save(update_fields=["first_name", "last_name"])
+            # 1) auth_user: email único
+            try:
+                dj_user = User.objects.create_user(username=email, email=email, password=password)
+            except IntegrityError:
+                return Response({"detail": "Ya existe un usuario con ese email."}, status=status.HTTP_409_CONFLICT)
             # 1) auth_user: email único
             try:
                 dj_user = User.objects.create_user(username=email, email=email, password=password)
@@ -136,6 +146,17 @@ def auth_register(request):
                         },
                     )
                 except IntegrityError:
+                    return Response({"carnetidentidad": "El carnet ya existe."}, status=status.HTTP_409_CONFLICT)
+                try:
+                    Paciente.objects.update_or_create(
+                        codusuario=usuario,
+                        defaults={
+                            "carnetidentidad": carnetidentidad,
+                            "fechanacimiento": fechanacimiento,
+                            "direccion": direccion,
+                        },
+                    )
+                except IntegrityError:
                     # UNIQUE(carnetidentidad) en BD
                     return Response({"carnetidentidad": "El carnet ya existe."}, status=status.HTTP_409_CONFLICT)
             elif rol_subtipo == "odontologo":
@@ -149,6 +170,10 @@ def auth_register(request):
                 # Fallback legacy -> paciente vacío
                 Paciente.objects.get_or_create(codusuario=usuario)
 
+    except DatabaseError as e:
+        return Response({"detail": "Error al registrar.", "error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
+
+    # Respuesta compatible con tu FE
     except IntegrityError as e:
         return Response(
             {"detail": "Error de integridad/DB.", "error": str(e)},
@@ -195,7 +220,6 @@ def password_reset_request(request):
     try:
         user = User.objects.get(email=email)
     except User.DoesNotExist:
-        # Seguridad: siempre respondemos 200
         return Response({"detail": "Si el correo existe, se enviará un link"}, status=status.HTTP_200_OK)
 
     # Generar token y uid
@@ -220,7 +244,7 @@ def password_reset_request(request):
         to=[user.email],
     )
     msg.attach_alternative(html_content, "text/html")
-    msg.send()  # lanzará excepción si hay problema SMTP
+    msg.send()
 
     return Response({"detail": "Si el correo existe, se enviará un link"}, status=status.HTTP_200_OK)
 
