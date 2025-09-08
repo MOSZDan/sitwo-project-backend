@@ -4,6 +4,13 @@ from .models import Paciente
 
 ROLES = ("paciente", "odontologo", "recepcionista")
 
+# Mapea rol -> idtipousuario del catálogo (ajusta si tus IDs reales son otros)
+ROLE_TO_TU = {
+    "paciente": 2,
+    "odontologo": 3,
+    "recepcionista": 4,
+}
+
 
 class RegisterSerializer(serializers.Serializer):
     # Credenciales
@@ -29,13 +36,13 @@ class RegisterSerializer(serializers.Serializer):
         # Rol por defecto: paciente
         rol = (attrs.get("rol") or "paciente").strip().lower()
 
-        # Derivar idtipousuario si no viene
+        # Derivar idtipousuario si no viene (solo si tenemos mapping)
         derived_idtu = ROLE_TO_TU.get(rol)
-        if not attrs.get("idtipousuario"):
+        if not attrs.get("idtipousuario") and derived_idtu is not None:
             attrs["idtipousuario"] = derived_idtu
 
-        # Si viene idtipousuario y también rol, exigir coherencia
-        if attrs.get("idtipousuario") != derived_idtu:
+        # Si viene idtipousuario y también rol, exigir coherencia (si hay mapping)
+        if derived_idtu is not None and attrs.get("idtipousuario") != derived_idtu:
             raise serializers.ValidationError({
                 "idtipousuario": "No coincide con el rol indicado."
             })
@@ -51,25 +58,18 @@ class RegisterSerializer(serializers.Serializer):
                 faltan.append("fechanacimiento")
             if not attrs.get("carnetidentidad"):
                 faltan.append("carnetidentidad")
-            for f in ("sexo", "direccion", "fechanacimiento", "carnetidentidad"):
-                if not attrs.get(f):
-                    faltan.append(f)
+
             if faltan:
                 raise serializers.ValidationError(
                     {"detail": f"Faltan campos de paciente: {', '.join(faltan)}"}
                 )
-            ci = (attrs.get("carnetidentidad") or "").strip()
-            if ci and Paciente.objects.filter(carnetidentidad=ci).exists():
-                raise serializers.ValidationError(
-                    {"carnetidentidad": "El carnet ya existe."}
-                )
-                raise serializers.ValidationError({
-                    "detail": f"Faltan campos de paciente: {', '.join(faltan)}"
-                })
 
-            # Normaliza CI y valida lógica mínima
+            # Normaliza CI y valida unicidad
             ci = (attrs.get("carnetidentidad") or "").strip().upper()
             attrs["carnetidentidad"] = ci
+
+            if ci and Paciente.objects.filter(carnetidentidad=ci).exists():
+                raise serializers.ValidationError({"carnetidentidad": "El carnet ya existe."})
 
             # Fecha de nacimiento no futura
             from datetime import date
