@@ -24,4 +24,5 @@ urlpatterns = [
     path("auth/password-reset-confirm/", views_auth.password_reset_confirm),
 
     path("", include(router.urls)),
+
 ]

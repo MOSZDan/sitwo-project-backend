@@ -61,3 +61,4 @@ class ConsultaViewSet(viewsets.ModelViewSet):
         if self.action == 'create':
             return CreateConsultaSerializer
         return ConsultaSerializer
+

@@ -15,3 +15,4 @@ class ApiConfig(AppConfig):
         if 'test' in sys.argv:
             for model in self.get_models():
                 model._meta.managed = True
+
