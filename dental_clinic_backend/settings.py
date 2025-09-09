@@ -38,6 +38,8 @@ CORS_ALLOWED_ORIGINS = _csv_env(
         "http://localhost:5174",
         "http://127.0.0.1:3000",
         "http://localhost:3000",
+        "https://sitwo-project.onrender.com"
+
     ],
 )
 CORS_ALLOW_CREDENTIALS = True
@@ -54,9 +56,9 @@ CSRF_TRUSTED_ORIGINS = _csv_env(
         "http://localhost:5174",
         "http://127.0.0.1:3000",
         "http://localhost:3000",
+        "https://sitwo-project.onrender.com",  # ← AGREGAR ESTA LÍNEA
     ],
 )
-
 if DEBUG:
     SESSION_COOKIE_SAMESITE = "Lax"
     CSRF_COOKIE_SAMESITE = "Lax"
