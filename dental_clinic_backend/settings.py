@@ -26,11 +26,7 @@ def _csv_env(name: str, default: list[str]) -> list[str]:
     return [x.strip() for x in raw.split(",") if x.strip()]
 
 # En prod, sobreescribe estos con variables de entorno (coma-separadas)
-ALLOWED_HOSTS = _csv_env("ALLOWED_HOSTS", [
-    "127.0.0.1", "localhost",
-    "sitwo-project-backend-vzq2.onrender.com"
-])
-
+ALLOWED_HOSTS = _csv_env("ALLOWED_HOSTS", ["127.0.0.1", "localhost"])
 
 # Frontends permitidos (Vercel u otros) para CORS
 CORS_ALLOWED_ORIGINS = _csv_env(
@@ -58,7 +54,6 @@ CSRF_TRUSTED_ORIGINS = _csv_env(
         "http://localhost:5174",
         "http://127.0.0.1:3000",
         "http://localhost:3000",
-
     ],
 )
 
@@ -96,6 +91,7 @@ INSTALLED_APPS = [
     "django.contrib.messages",
     "django.contrib.staticfiles",
     "rest_framework",
+    "rest_framework.authtoken",  # <- AGREGADO para Token Authentication
     "api",
 ]
 
@@ -170,13 +166,13 @@ STATIC_ROOT = BASE_DIR / "staticfiles"
 STATICFILES_STORAGE = "whitenoise.storage.CompressedManifestStaticFilesStorage"
 
 # ------------------------------------
-# DRF
+# DRF - CORREGIDO
 # ------------------------------------
 REST_FRAMEWORK = {
     "DEFAULT_PERMISSION_CLASSES": ["rest_framework.permissions.IsAuthenticated"],
     "DEFAULT_AUTHENTICATION_CLASSES": [
-        "api.auth_session.SessionAuth",
-        "rest_framework_simplejwt.authentication.JWTAuthentication",   # ← esta línea
+        "rest_framework.authentication.TokenAuthentication",  # <- CAMBIADO: Token Auth principal
+        "rest_framework.authentication.SessionAuthentication",  # <- Mantiene sesiones Django
     ],
     "DEFAULT_PAGINATION_CLASS": "rest_framework.pagination.PageNumberPagination",
     "PAGE_SIZE": 25,

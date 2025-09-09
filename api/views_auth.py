@@ -2,7 +2,7 @@
 from typing import Optional
 
 from django.views.decorators.csrf import ensure_csrf_cookie
-from django.contrib.auth import get_user_model
+from django.contrib.auth import get_user_model, authenticate
 from django.contrib.auth.tokens import default_token_generator
 from django.utils.encoding import force_bytes, force_str
 from django.utils.http import urlsafe_base64_encode, urlsafe_base64_decode
@@ -18,6 +18,7 @@ from rest_framework.decorators import (
 )
 from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
+from rest_framework.authtoken.models import Token
 
 from .serializers_auth import RegisterSerializer
 from .models import Usuario, Paciente, Odontologo, Recepcionista
@@ -39,7 +40,7 @@ def _resolve_tipodeusuario(idtipousuario: Optional[int]) -> int:
 
 
 @api_view(["POST"])
-@authentication_classes([])      # público
+@authentication_classes([])  # público
 @permission_classes([AllowAny])
 def auth_register(request):
     """
@@ -77,9 +78,11 @@ def auth_register(request):
             # Nombres (hasta 150 chars)
             update_fields = []
             if nombre:
-                dj_user.first_name = nombre[:150]; update_fields.append("first_name")
+                dj_user.first_name = nombre[:150];
+                update_fields.append("first_name")
             if apellido:
-                dj_user.last_name = apellido[:150]; update_fields.append("last_name")
+                dj_user.last_name = apellido[:150];
+                update_fields.append("last_name")
             if update_fields:
                 dj_user.save(update_fields=update_fields)
 
@@ -97,15 +100,20 @@ def auth_register(request):
             if not created:
                 changed = False
                 if usuario.idtipousuario_id != idtu:
-                    usuario.idtipousuario_id = idtu; changed = True
+                    usuario.idtipousuario_id = idtu;
+                    changed = True
                 if nombre and usuario.nombre != nombre:
-                    usuario.nombre = nombre; changed = True
+                    usuario.nombre = nombre;
+                    changed = True
                 if apellido and usuario.apellido != apellido:
-                    usuario.apellido = apellido; changed = True
+                    usuario.apellido = apellido;
+                    changed = True
                 if telefono is not None and usuario.telefono != telefono:
-                    usuario.telefono = telefono; changed = True
+                    usuario.telefono = telefono;
+                    changed = True
                 if sexo is not None and usuario.sexo != sexo:
-                    usuario.sexo = sexo; changed = True
+                    usuario.sexo = sexo;
+                    changed = True
                 if changed:
                     usuario.save()
 
@@ -157,11 +165,174 @@ def auth_register(request):
 
 
 # ============================
+# Inicio de sesión
+# ============================
+
+@api_view(["POST"])
+@authentication_classes([])  # público
+@permission_classes([AllowAny])
+def auth_login(request):
+    """
+    Inicio de sesión con email/password
+    Devuelve información del usuario y token de autenticación
+    """
+    email = request.data.get("email")
+    password = request.data.get("password")
+
+    if not email or not password:
+        return Response(
+            {"detail": "Email y contraseña son requeridos"},
+            status=status.HTTP_400_BAD_REQUEST
+        )
+
+    # Autenticar usuario (username=email en tu sistema)
+    user = authenticate(username=email.lower().strip(), password=password)
+
+    if not user:
+        return Response(
+            {"detail": "Credenciales inválidas"},
+            status=status.HTTP_401_UNAUTHORIZED
+        )
+
+    if not user.is_active:
+        return Response(
+            {"detail": "Cuenta desactivada"},
+            status=status.HTTP_401_UNAUTHORIZED
+        )
+
+    # Crear o obtener token
+    token, created = Token.objects.get_or_create(user=user)
+
+    # Obtener información del usuario del dominio
+    try:
+        usuario = Usuario.objects.get(correoelectronico=email.lower().strip())
+
+        # Determinar el subtipo/rol del usuario
+        subtipo = "usuario"  # default
+        if hasattr(usuario, 'paciente'):
+            subtipo = "paciente"
+        elif hasattr(usuario, 'odontologo'):
+            subtipo = "odontologo"
+        elif hasattr(usuario, 'recepcionista'):
+            subtipo = "recepcionista"
+        elif usuario.idtipousuario_id == 1:  # asumiendo que 1 es admin
+            subtipo = "administrador"
+
+    except Usuario.DoesNotExist:
+        # Si no existe en tabla Usuario, crear uno básico
+        usuario = Usuario.objects.create(
+            correoelectronico=email.lower().strip(),
+            nombre=user.first_name or email.split("@")[0],
+            apellido=user.last_name or "",
+            idtipousuario_id=2  # paciente por defecto
+        )
+        subtipo = "paciente"
+
+    return Response(
+        {
+            "ok": True,
+            "message": "Inicio de sesión exitoso",
+            "token": token.key,
+            "user": {
+                "id": user.id,
+                "email": user.email,
+                "first_name": user.first_name,
+                "last_name": user.last_name,
+                "is_active": user.is_active,
+            },
+            "usuario": {
+                "codigo": usuario.codigo,
+                "nombre": usuario.nombre,
+                "apellido": usuario.apellido,
+                "telefono": usuario.telefono,
+                "sexo": usuario.sexo,
+                "subtipo": subtipo,
+                "idtipousuario": usuario.idtipousuario_id,
+            }
+        },
+        status=status.HTTP_200_OK
+    )
+
+
+@api_view(["POST"])
+def auth_logout(request):
+    """
+    Cerrar sesión - elimina el token del usuario
+    """
+    try:
+        # Eliminar token si existe
+        if hasattr(request.user, 'auth_token'):
+            request.user.auth_token.delete()
+        return Response(
+            {"detail": "Sesión cerrada correctamente"},
+            status=status.HTTP_200_OK
+        )
+    except Exception as e:
+        return Response(
+            {"detail": "Error al cerrar sesión"},
+            status=status.HTTP_400_BAD_REQUEST
+        )
+
+
+@api_view(["GET"])
+def auth_user_info(request):
+    """
+    Obtener información del usuario autenticado actual
+    """
+    if not request.user.is_authenticated:
+        return Response(
+            {"detail": "No autenticado"},
+            status=status.HTTP_401_UNAUTHORIZED
+        )
+
+    try:
+        usuario = Usuario.objects.get(correoelectronico=request.user.email)
+
+        # Determinar subtipo
+        subtipo = "usuario"
+        if hasattr(usuario, 'paciente'):
+            subtipo = "paciente"
+        elif hasattr(usuario, 'odontologo'):
+            subtipo = "odontologo"
+        elif hasattr(usuario, 'recepcionista'):
+            subtipo = "recepcionista"
+        elif usuario.idtipousuario_id == 1:
+            subtipo = "administrador"
+
+    except Usuario.DoesNotExist:
+        return Response(
+            {"detail": "Usuario no encontrado"},
+            status=status.HTTP_404_NOT_FOUND
+        )
+
+    return Response(
+        {
+            "user": {
+                "id": request.user.id,
+                "email": request.user.email,
+                "first_name": request.user.first_name,
+                "last_name": request.user.last_name,
+            },
+            "usuario": {
+                "codigo": usuario.codigo,
+                "nombre": usuario.nombre,
+                "apellido": usuario.apellido,
+                "telefono": usuario.telefono,
+                "sexo": usuario.sexo,
+                "subtipo": subtipo,
+                "idtipousuario": usuario.idtipousuario_id,
+            }
+        },
+        status=status.HTTP_200_OK
+    )
+
+
+# ============================
 # Recuperación de contraseña
 # ============================
 
 @api_view(["POST"])
-@authentication_classes([])      # público
+@authentication_classes([])  # público
 @permission_classes([AllowAny])
 def password_reset_request(request):
     """
@@ -205,7 +376,7 @@ def password_reset_request(request):
 
 
 @api_view(["POST"])
-@authentication_classes([])      # público
+@authentication_classes([])  # público
 @permission_classes([AllowAny])
 def password_reset_confirm(request):
     """

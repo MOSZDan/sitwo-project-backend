@@ -15,6 +15,9 @@ urlpatterns = [
     # Auth
     path("auth/csrf/", views_auth.csrf_token),
     path("auth/register/", views_auth.auth_register),
+    path("auth/login/", views_auth.auth_login),
+    path("auth/logout/", views_auth.auth_logout),
+    path("auth/user/", views_auth.auth_user_info),
 
     # Recuperación de contraseña
     path("auth/password-reset/", views_auth.password_reset_request),
