@@ -26,12 +26,16 @@ from .models import Usuario, Paciente, Odontologo, Recepcionista
 User = get_user_model()
 
 
+# ============================
+# CSRF
+# ============================
 @api_view(["GET"])
-@permission_classes([AllowAny])
+@permission_classes([AllowAny])        # público
+@authentication_classes([])            # no exigir sesión
 @ensure_csrf_cookie
 def csrf_token(request):
     """Siembra cookie CSRF (csrftoken). Útil si luego usas endpoints con sesión/CSRF."""
-    return Response({"detail": "CSRF cookie set"})
+    return Response({"detail": "CSRF cookie set"}, status=status.HTTP_200_OK)
 
 
 def _resolve_tipodeusuario(idtipousuario: Optional[int]) -> int:
@@ -39,9 +43,12 @@ def _resolve_tipodeusuario(idtipousuario: Optional[int]) -> int:
     return idtipousuario if idtipousuario else 2
 
 
+# ============================
+# Registro
+# ============================
 @api_view(["POST"])
-@authentication_classes([])  # público
-@permission_classes([AllowAny])
+@authentication_classes([])            # público
+@permission_classes([AllowAny])        # público
 def auth_register(request):
     """
     Registro (NO inicia sesión):
@@ -78,11 +85,9 @@ def auth_register(request):
             # Nombres (hasta 150 chars)
             update_fields = []
             if nombre:
-                dj_user.first_name = nombre[:150];
-                update_fields.append("first_name")
+                dj_user.first_name = nombre[:150]; update_fields.append("first_name")
             if apellido:
-                dj_user.last_name = apellido[:150];
-                update_fields.append("last_name")
+                dj_user.last_name = apellido[:150]; update_fields.append("last_name")
             if update_fields:
                 dj_user.save(update_fields=update_fields)
 
@@ -100,20 +105,15 @@ def auth_register(request):
             if not created:
                 changed = False
                 if usuario.idtipousuario_id != idtu:
-                    usuario.idtipousuario_id = idtu;
-                    changed = True
+                    usuario.idtipousuario_id = idtu; changed = True
                 if nombre and usuario.nombre != nombre:
-                    usuario.nombre = nombre;
-                    changed = True
+                    usuario.nombre = nombre; changed = True
                 if apellido and usuario.apellido != apellido:
-                    usuario.apellido = apellido;
-                    changed = True
+                    usuario.apellido = apellido; changed = True
                 if telefono is not None and usuario.telefono != telefono:
-                    usuario.telefono = telefono;
-                    changed = True
+                    usuario.telefono = telefono; changed = True
                 if sexo is not None and usuario.sexo != sexo:
-                    usuario.sexo = sexo;
-                    changed = True
+                    usuario.sexo = sexo; changed = True
                 if changed:
                     usuario.save()
 
@@ -129,17 +129,14 @@ def auth_register(request):
                         },
                     )
                 except IntegrityError:
-                    # UNIQUE(carnetidentidad) en BD
                     return Response({"carnetidentidad": "El carnet ya existe."}, status=status.HTTP_409_CONFLICT)
             elif rol_subtipo == "odontologo":
                 Odontologo.objects.get_or_create(codusuario=usuario)
             elif rol_subtipo == "recepcionista":
                 Recepcionista.objects.get_or_create(codusuario=usuario)
             elif rol_subtipo == "administrador":
-                # Administrador no tiene subtipo 1-1 en tu esquema actual
                 pass
             else:
-                # Fallback legacy -> paciente vacío
                 Paciente.objects.get_or_create(codusuario=usuario)
 
     except DatabaseError as e:
@@ -165,66 +162,47 @@ def auth_register(request):
 
 
 # ============================
-# Inicio de sesión
+# Login / Logout / User info
 # ============================
-
 @api_view(["POST"])
-@authentication_classes([])  # público
-@permission_classes([AllowAny])
+@authentication_classes([])            # público
+@permission_classes([AllowAny])        # público
 def auth_login(request):
     """
     Inicio de sesión con email/password
     Devuelve información del usuario y token de autenticación
     """
-    email = request.data.get("email")
+    email = (request.data.get("email") or "").strip().lower()
     password = request.data.get("password")
-
     if not email or not password:
-        return Response(
-            {"detail": "Email y contraseña son requeridos"},
-            status=status.HTTP_400_BAD_REQUEST
-        )
+        return Response({"detail": "Email y contraseña son requeridos"}, status=status.HTTP_400_BAD_REQUEST)
 
-    # Autenticar usuario (username=email en tu sistema)
-    user = authenticate(username=email.lower().strip(), password=password)
-
+    user = authenticate(username=email, password=password)
     if not user:
-        return Response(
-            {"detail": "Credenciales inválidas"},
-            status=status.HTTP_401_UNAUTHORIZED
-        )
-
+        return Response({"detail": "Credenciales inválidas"}, status=status.HTTP_401_UNAUTHORIZED)
     if not user.is_active:
-        return Response(
-            {"detail": "Cuenta desactivada"},
-            status=status.HTTP_401_UNAUTHORIZED
-        )
+        return Response({"detail": "Cuenta desactivada"}, status=status.HTTP_401_UNAUTHORIZED)
 
-    # Crear o obtener token
-    token, created = Token.objects.get_or_create(user=user)
+    token, _ = Token.objects.get_or_create(user=user)
 
-    # Obtener información del usuario del dominio
     try:
-        usuario = Usuario.objects.get(correoelectronico=email.lower().strip())
-
-        # Determinar el subtipo/rol del usuario
-        subtipo = "usuario"  # default
-        if hasattr(usuario, 'paciente'):
+        usuario = Usuario.objects.get(correoelectronico=email)
+        # Determinar subtipo
+        subtipo = "usuario"
+        if hasattr(usuario, "paciente"):
             subtipo = "paciente"
-        elif hasattr(usuario, 'odontologo'):
+        elif hasattr(usuario, "odontologo"):
             subtipo = "odontologo"
-        elif hasattr(usuario, 'recepcionista'):
+        elif hasattr(usuario, "recepcionista"):
             subtipo = "recepcionista"
-        elif usuario.idtipousuario_id == 1:  # asumiendo que 1 es admin
+        elif usuario.idtipousuario_id == 1:
             subtipo = "administrador"
-
     except Usuario.DoesNotExist:
-        # Si no existe en tabla Usuario, crear uno básico
         usuario = Usuario.objects.create(
-            correoelectronico=email.lower().strip(),
+            correoelectronico=email,
             nombre=user.first_name or email.split("@")[0],
             apellido=user.last_name or "",
-            idtipousuario_id=2  # paciente por defecto
+            idtipousuario_id=2,  # paciente por defecto
         )
         subtipo = "paciente"
 
@@ -248,62 +226,43 @@ def auth_login(request):
                 "sexo": usuario.sexo,
                 "subtipo": subtipo,
                 "idtipousuario": usuario.idtipousuario_id,
-            }
+            },
         },
-        status=status.HTTP_200_OK
+        status=status.HTTP_200_OK,
     )
 
 
 @api_view(["POST"])
 def auth_logout(request):
-    """
-    Cerrar sesión - elimina el token del usuario
-    """
+    """Cerrar sesión - elimina el token del usuario"""
     try:
-        # Eliminar token si existe
-        if hasattr(request.user, 'auth_token'):
+        if hasattr(request.user, "auth_token"):
             request.user.auth_token.delete()
-        return Response(
-            {"detail": "Sesión cerrada correctamente"},
-            status=status.HTTP_200_OK
-        )
-    except Exception as e:
-        return Response(
-            {"detail": "Error al cerrar sesión"},
-            status=status.HTTP_400_BAD_REQUEST
-        )
+        return Response({"detail": "Sesión cerrada correctamente"}, status=status.HTTP_200_OK)
+    except Exception:
+        return Response({"detail": "Error al cerrar sesión"}, status=status.HTTP_400_BAD_REQUEST)
 
 
 @api_view(["GET"])
 def auth_user_info(request):
-    """
-    Obtener información del usuario autenticado actual
-    """
+    """Información del usuario autenticado actual"""
     if not request.user.is_authenticated:
-        return Response(
-            {"detail": "No autenticado"},
-            status=status.HTTP_401_UNAUTHORIZED
-        )
+        return Response({"detail": "No autenticado"}, status=status.HTTP_401_UNAUTHORIZED)
 
     try:
         usuario = Usuario.objects.get(correoelectronico=request.user.email)
-
         # Determinar subtipo
         subtipo = "usuario"
-        if hasattr(usuario, 'paciente'):
+        if hasattr(usuario, "paciente"):
             subtipo = "paciente"
-        elif hasattr(usuario, 'odontologo'):
+        elif hasattr(usuario, "odontologo"):
             subtipo = "odontologo"
-        elif hasattr(usuario, 'recepcionista'):
+        elif hasattr(usuario, "recepcionista"):
             subtipo = "recepcionista"
         elif usuario.idtipousuario_id == 1:
             subtipo = "administrador"
-
     except Usuario.DoesNotExist:
-        return Response(
-            {"detail": "Usuario no encontrado"},
-            status=status.HTTP_404_NOT_FOUND
-        )
+        return Response({"detail": "Usuario no encontrado"}, status=status.HTTP_404_NOT_FOUND)
 
     return Response(
         {
@@ -321,66 +280,68 @@ def auth_user_info(request):
                 "sexo": usuario.sexo,
                 "subtipo": subtipo,
                 "idtipousuario": usuario.idtipousuario_id,
-            }
+            },
         },
-        status=status.HTTP_200_OK
+        status=status.HTTP_200_OK,
     )
 
 
 # ============================
 # Recuperación de contraseña
 # ============================
-
 @api_view(["POST"])
-@authentication_classes([])  # público
-@permission_classes([AllowAny])
+@authentication_classes([])            # público
+@permission_classes([AllowAny])        # público
 def password_reset_request(request):
     """
-    Paso 1: Usuario envía su email -> se manda link de reset (HTML + texto)
+    Paso 1: Usuario envía su email -> se manda link de reset (HTML + texto).
+    Respuesta genérica anti-enumeración SIEMPRE 200.
     """
-    email = request.data.get("email")
+    email = (request.data.get("email") or "").strip().lower()
+    generic_msg = "Si el correo existe, enviamos un enlace para restablecer tu contraseña."
+
     if not email:
         return Response({"detail": "Email es requerido"}, status=status.HTTP_400_BAD_REQUEST)
 
-    try:
-        user = User.objects.get(email=email)
-    except User.DoesNotExist:
-        # No revelamos si existe
-        return Response({"detail": "Si el correo existe, se enviará un link"}, status=status.HTTP_200_OK)
+    user = User.objects.filter(email__iexact=email).first()
+    if user:
+        # Generar token y uid
+        uid = urlsafe_base64_encode(force_bytes(user.pk))
+        token = default_token_generator.make_token(user)
+        reset_url = f"{settings.FRONTEND_URL.rstrip('/')}/reset-password?uid={uid}&token={token}"
 
-    # Generar token y uid
-    uid = urlsafe_base64_encode(force_bytes(user.pk))
-    token = default_token_generator.make_token(user)
-    reset_url = f"{settings.FRONTEND_URL.rstrip('/')}/reset-password?uid={uid}&token={token}"
+        subject = "Recuperación de contraseña - Clínica Dental"
+        text_content = f"Usa este link para cambiar tu contraseña: {reset_url}"
+        html_content = f"""
+        <p>Hola{(' ' + (user.first_name or '')) if getattr(user, 'first_name', '') else ''},</p>
+        <p>Has solicitado recuperar tu contraseña. Haz clic en el siguiente enlace para continuar:</p>
+        <p><a href="{reset_url}">{reset_url}</a></p>
+        <p>Si no solicitaste este cambio, ignora este correo.</p>
+        """
+        try:
+            msg = EmailMultiAlternatives(
+                subject=subject,
+                body=text_content,
+                from_email=settings.DEFAULT_FROM_EMAIL,
+                to=[user.email],
+            )
+            msg.attach_alternative(html_content, "text/html")
+            # Si el backend de correo no está configurado, evita tirar 500:
+            msg.send(fail_silently=True)
+        except Exception:
+            # No filtramos detalles; mantenemos respuesta genérica
+            pass
 
-    # Enviar email HTML
-    subject = "Recuperación de contraseña - Clínica Dental"
-    text_content = f"Usa este link para cambiar tu contraseña: {reset_url}"
-    html_content = f"""
-    <p>Hola{(' ' + (user.first_name or '')) if getattr(user, 'first_name', '') else ''},</p>
-    <p>Has solicitado recuperar tu contraseña. Haz clic en el siguiente enlace para continuar:</p>
-    <p><a href="{reset_url}">{reset_url}</a></p>
-    <p>Si no solicitaste este cambio, ignora este correo.</p>
-    """
-
-    msg = EmailMultiAlternatives(
-        subject=subject,
-        body=text_content,
-        from_email=settings.DEFAULT_FROM_EMAIL,
-        to=[user.email],
-    )
-    msg.attach_alternative(html_content, "text/html")
-    msg.send()
-
-    return Response({"detail": "Si el correo existe, se enviará un link"}, status=status.HTTP_200_OK)
+    # Respuesta uniforme (exista o no el email)
+    return Response({"ok": True, "message": generic_msg}, status=status.HTTP_200_OK)
 
 
 @api_view(["POST"])
-@authentication_classes([])  # público
-@permission_classes([AllowAny])
+@authentication_classes([])            # público
+@permission_classes([AllowAny])        # público
 def password_reset_confirm(request):
     """
-    Paso 2: Usuario envía uid + token + nueva contraseña
+    Paso 2: Usuario envía uid + token + new_password
     """
     uid = request.data.get("uid")
     token = request.data.get("token")
@@ -401,4 +362,4 @@ def password_reset_confirm(request):
     user.set_password(new_password)
     user.save()
 
-    return Response({"detail": "Contraseña actualizada correctamente"}, status=status.HTTP_200_OK)
+    return Response({"ok": True, "message": "Contraseña actualizada correctamente"}, status=status.HTTP_200_OK)
