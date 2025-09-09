@@ -73,3 +73,29 @@ class ConsultaSerializer(serializers.ModelSerializer):
     class Meta:
         model = Consulta
         fields = "__all__"
+
+
+# NUEVO SERIALIZER PARA CREAR CITAS
+class CreateConsultaSerializer(serializers.ModelSerializer):
+    """
+    Serializer para crear nuevas consultas.
+    Acepta los IDs de las relaciones (paciente, odontologo, etc.).
+    """
+    codpaciente = serializers.PrimaryKeyRelatedField(queryset=Paciente.objects.all())
+    cododontologo = serializers.PrimaryKeyRelatedField(queryset=Odontologo.objects.all(), required=False, allow_null=True)
+    codrecepcionista = serializers.PrimaryKeyRelatedField(queryset=Recepcionista.objects.all(), required=False, allow_null=True)
+    idhorario = serializers.PrimaryKeyRelatedField(queryset=Horario.objects.all())
+    idtipoconsulta = serializers.PrimaryKeyRelatedField(queryset=Tipodeconsulta.objects.all())
+    idestadoconsulta = serializers.PrimaryKeyRelatedField(queryset=Estadodeconsulta.objects.all())
+
+    class Meta:
+        model = Consulta
+        fields = (
+            'fecha',
+            'codpaciente',
+            'cododontologo',
+            'codrecepcionista',
+            'idhorario',
+            'idtipoconsulta',
+            'idestadoconsulta',
+        )

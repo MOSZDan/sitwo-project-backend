@@ -6,6 +6,7 @@ from pathlib import Path
 import os
 from dotenv import load_dotenv
 import dj_database_url
+import sys
 
 # ------------------------------------
 # Paths / .env
@@ -199,3 +200,20 @@ EMAIL_HOST_USER = os.getenv("EMAIL_HOST_USER", "apikey")
 EMAIL_HOST_PASSWORD = os.getenv("EMAIL_HOST_PASSWORD", "")
 EMAIL_USE_TLS = os.getenv("EMAIL_USE_TLS", "True") == "True"
 EMAIL_USE_SSL = os.getenv("EMAIL_USE_SSL", "False") == "True"
+
+if 'test' in sys.argv:
+    DATABASES = {
+        'default': {
+            'ENGINE': 'django.db.backends.sqlite3',
+            'NAME': ':memory:',
+        }
+    }
+
+    # Desactiva las migraciones para crear las tablas desde los modelos
+    MIGRATION_MODULES = {
+        app.split('.')[-1]: None for app in INSTALLED_APPS
+    }
+
+    # ¡¡LA LÍNEA CLAVE QUE FALTABA!!
+    # Desactiva la redirección a HTTPS durante las pruebas
+    SECURE_SSL_REDIRECT = False

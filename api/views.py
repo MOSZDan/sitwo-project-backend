@@ -1,12 +1,13 @@
 from django.http import JsonResponse
 from django.contrib.auth import get_user_model
 from django.db import connection
+from rest_framework import viewsets
 
 from rest_framework.viewsets import ReadOnlyModelViewSet
 from rest_framework.permissions import IsAuthenticated
 
 from .models import Paciente, Consulta
-from .serializers import PacienteSerializer, ConsultaSerializer
+from .serializers import PacienteSerializer, ConsultaSerializer, CreateConsultaSerializer
 
 
 def health(request):
@@ -38,11 +39,11 @@ class PacienteViewSet(ReadOnlyModelViewSet):
     serializer_class = PacienteSerializer
 
 
-class ConsultaViewSet(ReadOnlyModelViewSet):
+class ConsultaViewSet(viewsets.ModelViewSet):
     """
-    API read-only de Consultas.
-    Requiere sesión activa (IsAuthenticated) y hace select_related de sus relaciones
-    para evitar N+1 queries.
+    API para leer, crear, actualizar y eliminar Consultas (citas).
+    Requiere sesión activa (IsAuthenticated).
+    Usa un serializer diferente para la creación vs. la lectura.
     """
     permission_classes = [IsAuthenticated]
     queryset = (
@@ -55,4 +56,8 @@ class ConsultaViewSet(ReadOnlyModelViewSet):
             "idestadoconsulta",
         ).all()
     )
-    serializer_class = ConsultaSerializer
+
+    def get_serializer_class(self):
+        if self.action == 'create':
+            return CreateConsultaSerializer
+        return ConsultaSerializer
