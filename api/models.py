@@ -18,7 +18,7 @@ class Usuario(models.Model):
     idtipousuario = models.ForeignKey('Tipodeusuario', models.DO_NOTHING, db_column='idtipousuario')
 
     class Meta:
-        managed = False
+        #managed = False
         db_table = 'usuario'
 
 
@@ -29,7 +29,7 @@ class Paciente(models.Model):
     direccion = models.TextField(blank=True, null=True)
 
     class Meta:
-        managed = False
+       # managed = False
         db_table = 'paciente'
 
 
@@ -40,7 +40,7 @@ class Odontologo(models.Model):
     nromatricula = models.CharField(unique=True, max_length=100, blank=True, null=True)
 
     class Meta:
-        managed = False
+        #managed = False
         db_table = 'odontologo'
 
 
@@ -49,7 +49,7 @@ class Recepcionista(models.Model):
     habilidadessoftware = models.TextField(blank=True, null=True)
 
     class Meta:
-        managed = False
+        #managed = False
         db_table = 'recepcionista'
 
 
@@ -63,7 +63,7 @@ class Consulta(models.Model):
     idestadoconsulta = models.ForeignKey('Estadodeconsulta', models.DO_NOTHING, db_column='idestadoconsulta')
 
     class Meta:
-        managed = False
+        #managed = False
         db_table = 'consulta'
 
 
@@ -71,7 +71,7 @@ class Tipodeconsulta(models.Model):
     nombreconsulta = models.CharField(max_length=255)
 
     class Meta:
-        managed = False
+        #managed = False
         db_table = 'tipodeconsulta'
 
 
@@ -83,7 +83,7 @@ class Historialclinico(models.Model):
     diagnostico = models.TextField(blank=True, null=True)
 
     class Meta:
-        managed = False
+        #managed = False
         db_table = 'historialclinico'
 
 
@@ -93,7 +93,7 @@ class Servicio(models.Model):
     costobase = models.DecimalField(max_digits=10, decimal_places=2)
 
     class Meta:
-        managed = False
+        #managed = False
         db_table = 'servicio'
 
 
@@ -104,7 +104,7 @@ class Insumo(models.Model):
     unidaddemedida = models.CharField(max_length=50, blank=True, null=True)
 
     class Meta:
-        managed = False
+        #managed = False
         db_table = 'insumo'
 
 
@@ -114,7 +114,7 @@ class Medicamento(models.Model):
     presentacion = models.CharField(max_length=255, blank=True, null=True)
 
     class Meta:
-        managed = False
+        #managed = False
         db_table = 'medicamento'
 
 
@@ -124,7 +124,7 @@ class Recetamedica(models.Model):
     fechaemision = models.DateField()
 
     class Meta:
-        managed = False
+        #managed = False
         db_table = 'recetamedica'
 
 
@@ -134,7 +134,7 @@ class Imtemreceta(models.Model):
     posologia = models.TextField()
 
     class Meta:
-        managed = False
+        #managed = False
         db_table = 'imtemreceta'
 
 
@@ -147,7 +147,7 @@ class Plandetratamiento(models.Model):
     montototal = models.DecimalField(max_digits=10, decimal_places=2, blank=True, null=True)
 
     class Meta:
-        managed = False
+        #managed = False
         db_table = 'plandetratamiento'
 
 
@@ -159,7 +159,7 @@ class Itemplandetratamiento(models.Model):
     costofinal = models.DecimalField(max_digits=10, decimal_places=2)
 
     class Meta:
-        managed = False
+        #managed = False
         db_table = 'itemplandetratamiento'
 
 
@@ -170,7 +170,7 @@ class Factura(models.Model):
     montototal = models.DecimalField(max_digits=10, decimal_places=2)
 
     class Meta:
-        managed = False
+        #managed = False
         db_table = 'factura'
 
 
@@ -180,7 +180,7 @@ class Itemdefactura(models.Model):
     monto = models.DecimalField(max_digits=10, decimal_places=2)
 
     class Meta:
-        managed = False
+        #managed = False
         db_table = 'itemdefactura'
 
 
@@ -191,7 +191,7 @@ class Pago(models.Model):
     fechapago = models.DateField()
 
     class Meta:
-        managed = False
+        #managed = False
         db_table = 'pago'
 
 
@@ -202,7 +202,7 @@ class Documentoadjunto(models.Model):
     fechacreacion = models.DateField(blank=True, null=True)
 
     class Meta:
-        managed = False
+        #managed = False
         db_table = 'documentoadjunto'
 
 
@@ -211,7 +211,7 @@ class Piezadental(models.Model):
     grupo = models.CharField(max_length=100, blank=True, null=True)
 
     class Meta:
-        managed = False
+        #managed = False
         db_table = 'piezadental'
 
 
@@ -222,7 +222,7 @@ class Registroodontograma(models.Model):
     fecharegistro = models.DateField()
 
     class Meta:
-        managed = False
+        #managed = False
         db_table = 'registroodontograma'
 
 
@@ -230,7 +230,7 @@ class Horario(models.Model):
     hora = models.TimeField(unique=True)
 
     class Meta:
-        managed = False
+        #managed = False
         db_table = 'horario'
 
 
@@ -238,7 +238,7 @@ class Estado(models.Model):
     estado = models.CharField(unique=True, max_length=100)
 
     class Meta:
-        managed = False
+        #managed = False
         db_table = 'estado'
 
 
@@ -246,7 +246,7 @@ class Estadodeconsulta(models.Model):
     estado = models.CharField(unique=True, max_length=100)
 
     class Meta:
-        managed = False
+        #managed = False
         db_table = 'estadodeconsulta'
 
 
@@ -254,7 +254,7 @@ class Estadodefactura(models.Model):
     estado = models.CharField(unique=True, max_length=100)
 
     class Meta:
-        managed = False
+        #managed = False
         db_table = 'estadodefactura'
 # This is an auto-generated Django model module.
 # You'll have to do the following manually to clean this up:
@@ -271,7 +271,7 @@ class Tipodeusuario(models.Model):
     descripcion = models.TextField(blank=True, null=True)
 
     class Meta:
-        managed = False
+        #managed = False
         db_table = 'tipodeusuario'
 
 
@@ -279,5 +279,5 @@ class Tipopago(models.Model):
     nombrepago = models.CharField(unique=True, max_length=100)
 
     class Meta:
-        managed = False
+        #managed = False
         db_table = 'tipopago'
