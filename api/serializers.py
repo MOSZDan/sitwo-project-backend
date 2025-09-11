@@ -4,6 +4,7 @@ from .models import (
     Horario, Tipodeconsulta, Estadodeconsulta, Consulta
 )
 
+
 # --------- Usuarios / Pacientes ---------
 
 class UsuarioMiniSerializer(serializers.ModelSerializer):
@@ -59,7 +60,23 @@ class EstadodeconsultaSerializer(serializers.ModelSerializer):
         model = Estadodeconsulta
         fields = ("id", "estado")
 
+# --------- NUEVO SERIALIZER PARA CREAR CONSULTAS ---------
+class CreateConsultaSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Consulta
+        # Campos que el frontend enviará para crear una cita
+        fields = (
+            'fecha',
+            'codpaciente',
+            'cododontologo',
+            'idhorario',
+            'idtipoconsulta',
+            'idestadoconsulta',
+            # El codrecepcionista es opcional
+            'codrecepcionista',
+        )
 
+# --------- Consulta (se mantiene igual) ---------
 # --------- Consulta ---------
 
 class ConsultaSerializer(serializers.ModelSerializer):
