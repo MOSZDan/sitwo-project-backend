@@ -2,15 +2,16 @@ from django.http import JsonResponse
 from django.contrib.auth import get_user_model
 from django.db import connection
 
-from rest_framework.viewsets import ReadOnlyModelViewSet
-# Reemplaza ReadOnlyModelViewSet con ModelViewSet
+
 from rest_framework.viewsets import ModelViewSet
 from rest_framework.permissions import IsAuthenticated
 
-from .models import Paciente, Consulta
+from .models import Paciente, Consulta, Odontologo, Horario, Tipodeconsulta
 # Asegúrate de importar también los nuevos serializers que crearemos
-from .serializers import PacienteSerializer, ConsultaSerializer, CreateConsultaSerializer
+from .serializers import PacienteSerializer, ConsultaSerializer, CreateConsultaSerializer, OdontologoMiniSerializer, \
+    HorarioSerializer, TipodeconsultaSerializer
 
+from rest_framework.viewsets import ReadOnlyModelViewSet
 
 
 def health(request):
@@ -63,3 +64,18 @@ class ConsultaViewSet(ModelViewSet):  # 👈 ¡CAMBIO IMPORTANTE!
         if self.action in ['create', 'update', 'partial_update']:
             return CreateConsultaSerializer
         return ConsultaSerializer
+
+class OdontologoViewSet(ReadOnlyModelViewSet):
+    """Devuelve una lista de odontólogos."""
+    queryset = Odontologo.objects.all()
+    serializer_class = OdontologoMiniSerializer
+
+class HorarioViewSet(ReadOnlyModelViewSet):
+    """Devuelve una lista de horarios disponibles."""
+    queryset = Horario.objects.all()
+    serializer_class = HorarioSerializer
+
+class TipodeconsultaViewSet(ReadOnlyModelViewSet):
+    """Devuelve los tipos de consulta."""
+    queryset = Tipodeconsulta.objects.all()
+    serializer_class = TipodeconsultaSerializer
