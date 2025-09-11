@@ -12,6 +12,7 @@ from .serializers import PacienteSerializer, ConsultaSerializer, CreateConsultaS
     HorarioSerializer, TipodeconsultaSerializer
 
 from rest_framework.viewsets import ReadOnlyModelViewSet
+from django_filters.rest_framework import DjangoFilterBackend
 
 
 def health(request):
@@ -58,7 +59,8 @@ class ConsultaViewSet(ModelViewSet):  # 👈 ¡CAMBIO IMPORTANTE!
             "idestadoconsulta",
         ).all()
     )
-
+    filter_backends = [DjangoFilterBackend]
+    filterset_fields = ['codpaciente']
     # Esto permite usar un serializer para leer y otro para crear/actualizar
     def get_serializer_class(self):
         if self.action in ['create', 'update', 'partial_update']:
