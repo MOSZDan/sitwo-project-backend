@@ -12,6 +12,7 @@ class UsuarioMiniSerializer(serializers.ModelSerializer):
         model = Usuario
         fields = ("codigo", "nombre", "apellido", "correoelectronico", "telefono")
 
+
 class PacienteSerializer(serializers.ModelSerializer):
     # OneToOne a Usuario (solo lectura, anidado)
     codusuario = UsuarioMiniSerializer(read_only=True)
@@ -19,6 +20,7 @@ class PacienteSerializer(serializers.ModelSerializer):
     class Meta:
         model = Paciente
         fields = "__all__"
+
 
 # Versión mini de Paciente para anidar en otras respuestas
 class PacienteMiniSerializer(serializers.ModelSerializer):
@@ -38,6 +40,7 @@ class OdontologoMiniSerializer(serializers.ModelSerializer):
         model = Odontologo
         fields = ("codusuario", "especialidad", "nromatricula")
 
+
 class RecepcionistaMiniSerializer(serializers.ModelSerializer):
     codusuario = UsuarioMiniSerializer(read_only=True)
 
@@ -45,20 +48,24 @@ class RecepcionistaMiniSerializer(serializers.ModelSerializer):
         model = Recepcionista
         fields = ("codusuario",)
 
+
 class HorarioSerializer(serializers.ModelSerializer):
     class Meta:
         model = Horario
         fields = ("hora",)
+
 
 class TipodeconsultaSerializer(serializers.ModelSerializer):
     class Meta:
         model = Tipodeconsulta
         fields = ("id", "nombreconsulta")
 
+
 class EstadodeconsultaSerializer(serializers.ModelSerializer):
     class Meta:
         model = Estadodeconsulta
         fields = ("id", "estado")
+
 
 # --------- NUEVO SERIALIZER PARA CREAR CONSULTAS ---------
 class CreateConsultaSerializer(serializers.ModelSerializer):
@@ -76,6 +83,7 @@ class CreateConsultaSerializer(serializers.ModelSerializer):
             'codrecepcionista',
         )
 
+
 # --------- Consulta (se mantiene igual) ---------
 # --------- Consulta ---------
 
@@ -90,3 +98,13 @@ class ConsultaSerializer(serializers.ModelSerializer):
     class Meta:
         model = Consulta
         fields = "__all__"
+
+
+class UpdateConsultaSerializer(serializers.ModelSerializer):
+    """
+    Serializador específico para actualizar solo el estado de una consulta.
+    """
+
+    class Meta:
+        model = Consulta
+        fields = ['idestadoconsulta']
