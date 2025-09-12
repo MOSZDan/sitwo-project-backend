@@ -6,14 +6,9 @@ from . import views, views_auth
 router = DefaultRouter()
 router.register(r"pacientes", views.PacienteViewSet, basename="pacientes")
 router.register(r"consultas", views.ConsultaViewSet, basename="consultas")
-router = DefaultRouter()
-router.register(r"pacientes", views.PacienteViewSet, basename="pacientes")
-router.register(r"consultas", views.ConsultaViewSet, basename="consultas")
-# 👇 AÑADE ESTAS NUEVAS RUTAS
 router.register(r"odontologos", views.OdontologoViewSet, basename="odontologos")
 router.register(r"horarios", views.HorarioViewSet, basename="horarios")
 router.register(r"tipos-consulta", views.TipodeconsultaViewSet, basename="tipos-consulta")
-
 
 urlpatterns = [
     path("health/", views.health),
@@ -26,11 +21,11 @@ urlpatterns = [
     path("auth/login/", views_auth.auth_login),
     path("auth/logout/", views_auth.auth_logout),
     path("auth/user/", views_auth.auth_user_info),
-
-    # Recuperación de contraseña
     path("auth/password-reset/", views_auth.password_reset_request),
     path("auth/password-reset-confirm/", views_auth.password_reset_confirm),
 
-    path("", include(router.urls)),
+    # 🆕 SISTEMA DE NOTIFICACIONES
+    path("notificaciones/", include("api.urls_notifications")),
 
+    path("", include(router.urls)),
 ]

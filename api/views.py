@@ -1,7 +1,8 @@
 from django.http import JsonResponse
 from django.contrib.auth import get_user_model
 from django.db import connection
-
+from django.views.decorators.csrf import csrf_exempt
+from django.views.decorators.http import require_http_methods
 
 from rest_framework.viewsets import ModelViewSet
 from rest_framework.permissions import IsAuthenticated
@@ -14,24 +15,27 @@ from .serializers import PacienteSerializer, ConsultaSerializer, CreateConsultaS
 from rest_framework.viewsets import ReadOnlyModelViewSet
 
 
+@csrf_exempt
+@require_http_methods(["GET"])
 def health(request):
     """Ping de salud"""
     return JsonResponse({"ok": True})
 
-
+@csrf_exempt
+@require_http_methods(["GET"])
 def db_info(request):
-    """Info rápida de la conexión a DB (útil en dev/diagnóstico)."""
+    """Info rápida de la conexión a DB"""
     with connection.cursor() as cur:
         cur.execute("select current_database(), current_user")
         db, user = cur.fetchone()
     return JsonResponse({"database": db, "user": user})
 
-
+@csrf_exempt
+@require_http_methods(["GET"])
 def users_count(request):
-    """Cuenta de usuarios del auth de Django (tabla auth_user)."""
+    """Cuenta de usuarios del auth de Django"""
     User = get_user_model()
     return JsonResponse({"users": User.objects.count()})
-
 
 class PacienteViewSet(ReadOnlyModelViewSet):
     """

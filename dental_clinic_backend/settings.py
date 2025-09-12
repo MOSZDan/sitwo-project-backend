@@ -17,7 +17,7 @@ load_dotenv(BASE_DIR / ".env")
 # Seguridad / Debug
 # ------------------------------------
 SECRET_KEY = os.getenv("SECRET_KEY", "dev-only-not-secret")
-DEBUG = os.getenv("DEBUG", "False") == "True"
+DEBUG = os.getenv("DEBUG", "false") .lower() == "true"
 
 def _csv_env(name: str, default: list[str]) -> list[str]:
     raw = os.getenv(name, "")
@@ -26,8 +26,7 @@ def _csv_env(name: str, default: list[str]) -> list[str]:
     return [x.strip() for x in raw.split(",") if x.strip()]
 
 # En prod, sobreescribe estos con variables de entorno (coma-separadas)
-ALLOWED_HOSTS = _csv_env("ALLOWED_HOSTS", ["127.0.0.1", "localhost","sitwo-project-backend-vzq2.onrender.com"])
-
+#ALLOWED_HOSTS = _csv_env("ALLOWED_HOSTS", ["127.0.0.1", "localhost", "127.0.0.1:8000", "localhost:8000", "sitwo-project-backend-vzq2.onrender.com"])
 # Frontends permitidos (Vercel u otros) para CORS
 CORS_ALLOWED_ORIGINS = _csv_env(
     "CORS_ALLOWED_ORIGINS",
@@ -38,8 +37,6 @@ CORS_ALLOWED_ORIGINS = _csv_env(
         "http://localhost:5174",
         "http://127.0.0.1:3000",
         "http://localhost:3000",
-        "https://sitwo-project.onrender.com"
-
     ],
 )
 CORS_ALLOW_CREDENTIALS = True
@@ -56,10 +53,12 @@ CSRF_TRUSTED_ORIGINS = _csv_env(
         "http://localhost:5174",
         "http://127.0.0.1:3000",
         "http://localhost:3000",
-        "https://sitwo-project.onrender.com",  # ← AGREGAR ESTA LÍNEA
+
     ],
 )
+
 if DEBUG:
+    ALLOWED_HOSTS = ["*"]
     SESSION_COOKIE_SAMESITE = "Lax"
     CSRF_COOKIE_SAMESITE = "Lax"
     SESSION_COOKIE_SECURE = False
@@ -69,7 +68,7 @@ else:
     CSRF_COOKIE_SAMESITE = os.getenv("CSRF_COOKIE_SAMESITE", "None")
     SESSION_COOKIE_SECURE = True
     CSRF_COOKIE_SECURE = True
-
+    ALLOWED_HOSTS = _csv_env("ALLOWED_HOSTS", ["sitwo-project-backend-vzq2.onrender.com"])
 CSRF_COOKIE_NAME = "csrftoken"   # por claridad; por defecto ya es este
 # Importante para Render detrás de proxy
 SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
@@ -93,8 +92,9 @@ INSTALLED_APPS = [
     "django.contrib.messages",
     "django.contrib.staticfiles",
     "rest_framework",
-    "rest_framework.authtoken",  # <- AGREGADO para Token Authentication
     "api",
+    "rest_framework.authtoken",
+    # "rest_framework_simplejwt",
 ]
 
 # ------------------------------------
@@ -168,16 +168,21 @@ STATIC_ROOT = BASE_DIR / "staticfiles"
 STATICFILES_STORAGE = "whitenoise.storage.CompressedManifestStaticFilesStorage"
 
 # ------------------------------------
-# DRF - CORREGIDO
+# DRF
 # ------------------------------------
 REST_FRAMEWORK = {
     "DEFAULT_PERMISSION_CLASSES": ["rest_framework.permissions.IsAuthenticated"],
     "DEFAULT_AUTHENTICATION_CLASSES": [
-        "rest_framework.authentication.TokenAuthentication",  # <- CAMBIADO: Token Auth principal
-        "rest_framework.authentication.SessionAuthentication",  # <- Mantiene sesiones Django
+        "rest_framework.authentication.TokenAuthentication",
+        "rest_framework.authentication.SessionAuthentication",
     ],
     "DEFAULT_PAGINATION_CLASS": "rest_framework.pagination.PageNumberPagination",
     "PAGE_SIZE": 25,
+    'DEFAULT_THROTTLE_RATES': {
+        'notifications': '100/hour',
+        'device_registration': '10/day',
+        'preference_updates': '50/hour',
+    }
 }
 
 # ------------------------------------
@@ -188,7 +193,7 @@ DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 # ------------------------------------
 # Frontend y Email (para recuperar contraseña)
 # ------------------------------------
-FRONTEND_URL = os.getenv("FRONTEND_URL", "https://sitwo-project.onrender.com")
+FRONTEND_URL = os.getenv("FRONTEND_URL", "http://localhost:5174")
 
 DEFAULT_FROM_EMAIL = os.getenv("DEFAULT_FROM_EMAIL", "no-reply@clinica.local")
 
@@ -199,3 +204,74 @@ EMAIL_HOST_USER = os.getenv("EMAIL_HOST_USER", "apikey")
 EMAIL_HOST_PASSWORD = os.getenv("EMAIL_HOST_PASSWORD", "")
 EMAIL_USE_TLS = os.getenv("EMAIL_USE_TLS", "True") == "True"
 EMAIL_USE_SSL = os.getenv("EMAIL_USE_SSL", "False") == "True"
+
+
+# ------------------------------------
+# 🆕 CONFIGURACIÓN DE NOTIFICACIONES
+# ------------------------------------
+
+# Push Notifications usando Supabase Edge Functions (alternativa a Firebase)
+ONESIGNAL_APP_ID = os.getenv("ONESIGNAL_APP_ID", "")
+ONESIGNAL_REST_API_KEY = os.getenv("ONESIGNAL_REST_API_KEY", "")
+
+# Configuración de notificaciones por email
+DEFAULT_REMINDER_HOURS = int(os.getenv("DEFAULT_REMINDER_HOURS", "24"))
+MAX_NOTIFICATION_RETRIES = int(os.getenv("MAX_NOTIFICATION_RETRIES", "3"))
+NOTIFICATION_RETRY_DELAY = int(os.getenv("NOTIFICATION_RETRY_DELAY", "30"))
+
+# Información de la clínica para emails
+CLINIC_INFO = {
+    'name': os.getenv("CLINIC_NAME", "Clínica Dental"),
+    'address': os.getenv("CLINIC_ADDRESS", "Santa Cruz, Bolivia"),
+    'phone': os.getenv("CLINIC_PHONE", "+591 XXXXXXXX"),
+    'email': os.getenv("CLINIC_EMAIL", "info@clinica.com"),
+    'website': FRONTEND_URL,
+}
+
+# Configuración de logging para notificaciones
+import os
+logs_dir = os.path.join(BASE_DIR, 'logs')
+if not os.path.exists(logs_dir):
+    os.makedirs(logs_dir)
+
+# Throttling para APIs de notificaciones
+REST_FRAMEWORK.update({
+    'DEFAULT_THROTTLE_RATES': {
+        'notifications': '100/hour',
+        'device_registration': '10/day',
+        'preference_updates': '50/hour',
+    }
+})
+# Al final de settings.py
+LOGGING = {
+    'version': 1,
+    'disable_existing_loggers': False,
+    'formatters': {
+        'verbose': {
+            'format': '{levelname} {asctime} {module} {process:d} {thread:d} {message}',
+            'style': '{',
+        },
+    },
+    'handlers': {
+        'console': {
+            'class': 'logging.StreamHandler',
+            'formatter': 'verbose',
+        },
+    },
+    'root': {
+        'handlers': ['console'],
+        'level': 'INFO',
+    },
+    'loggers': {
+        'django': {
+            'handlers': ['console'],
+            'level': 'DEBUG',
+            'propagate': False,
+        },
+        'django.request': {
+            'handlers': ['console'],
+            'level': 'DEBUG',
+            'propagate': False,
+        },
+    },
+}
