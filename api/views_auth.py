@@ -9,7 +9,9 @@ from django.utils.http import urlsafe_base64_encode, urlsafe_base64_decode
 from django.core.mail import EmailMultiAlternatives
 from django.conf import settings
 from django.db import transaction, IntegrityError, DatabaseError
-
+from .serializers import UserNotificationSettingsSerializer
+from .models import Usuario, Paciente, Odontologo, Recepcionista
+from .serializers import UserNotificationSettingsSerializer
 from rest_framework import status
 from rest_framework.decorators import (
     api_view,
@@ -30,8 +32,8 @@ User = get_user_model()
 # CSRF
 # ============================
 @api_view(["GET"])
-@permission_classes([AllowAny])        # público
-@authentication_classes([])            # no exigir sesión
+@permission_classes([AllowAny])  # público
+@authentication_classes([])  # no exigir sesión
 @ensure_csrf_cookie
 def csrf_token(request):
     """Siembra cookie CSRF (csrftoken). Útil si luego usas endpoints con sesión/CSRF."""
@@ -47,8 +49,8 @@ def _resolve_tipodeusuario(idtipousuario: Optional[int]) -> int:
 # Registro
 # ============================
 @api_view(["POST"])
-@authentication_classes([])            # público
-@permission_classes([AllowAny])        # público
+@authentication_classes([])  # público
+@permission_classes([AllowAny])  # público
 def auth_register(request):
     """
     Registro (NO inicia sesión):
@@ -85,9 +87,11 @@ def auth_register(request):
             # Nombres (hasta 150 chars)
             update_fields = []
             if nombre:
-                dj_user.first_name = nombre[:150]; update_fields.append("first_name")
+                dj_user.first_name = nombre[:150];
+                update_fields.append("first_name")
             if apellido:
-                dj_user.last_name = apellido[:150]; update_fields.append("last_name")
+                dj_user.last_name = apellido[:150];
+                update_fields.append("last_name")
             if update_fields:
                 dj_user.save(update_fields=update_fields)
 
@@ -105,15 +109,20 @@ def auth_register(request):
             if not created:
                 changed = False
                 if usuario.idtipousuario_id != idtu:
-                    usuario.idtipousuario_id = idtu; changed = True
+                    usuario.idtipousuario_id = idtu;
+                    changed = True
                 if nombre and usuario.nombre != nombre:
-                    usuario.nombre = nombre; changed = True
+                    usuario.nombre = nombre;
+                    changed = True
                 if apellido and usuario.apellido != apellido:
-                    usuario.apellido = apellido; changed = True
+                    usuario.apellido = apellido;
+                    changed = True
                 if telefono is not None and usuario.telefono != telefono:
-                    usuario.telefono = telefono; changed = True
+                    usuario.telefono = telefono;
+                    changed = True
                 if sexo is not None and usuario.sexo != sexo:
-                    usuario.sexo = sexo; changed = True
+                    usuario.sexo = sexo;
+                    changed = True
                 if changed:
                     usuario.save()
 
@@ -165,8 +174,8 @@ def auth_register(request):
 # Login / Logout / User info
 # ============================
 @api_view(["POST"])
-@authentication_classes([])            # público
-@permission_classes([AllowAny])        # público
+@authentication_classes([])  # público
+@permission_classes([AllowAny])  # público
 def auth_login(request):
     """
     Inicio de sesión con email/password
@@ -290,8 +299,8 @@ def auth_user_info(request):
 # Recuperación de contraseña
 # ============================
 @api_view(["POST"])
-@authentication_classes([])            # público
-@permission_classes([AllowAny])        # público
+@authentication_classes([])  # público
+@permission_classes([AllowAny])  # público
 def password_reset_request(request):
     """
     Paso 1: Usuario envía su email -> se manda link de reset (HTML + texto).
@@ -337,8 +346,8 @@ def password_reset_request(request):
 
 
 @api_view(["POST"])
-@authentication_classes([])            # público
-@permission_classes([AllowAny])        # público
+@authentication_classes([])  # público
+@permission_classes([AllowAny])  # público
 def password_reset_confirm(request):
     """
     Paso 2: Usuario envía uid + token + new_password
@@ -363,3 +372,31 @@ def password_reset_confirm(request):
     user.save()
 
     return Response({"ok": True, "message": "Contraseña actualizada correctamente"}, status=status.HTTP_200_OK)
+
+
+# Preferencias de Usuario
+# ============================
+@api_view(["PATCH"])
+def auth_user_settings_update(request):
+    """
+    Actualiza las preferencias del usuario autenticado.
+    Por ahora, solo para activar/desactivar notificaciones.
+    """
+    if not request.user.is_authenticated:
+        return Response({"detail": "No autenticado"}, status=status.HTTP_401_UNAUTHORIZED)
+
+    try:
+        usuario_instance = Usuario.objects.get(correoelectronico=request.user.email)
+    except Usuario.DoesNotExist:
+        return Response({"detail": "Usuario no encontrado"}, status=status.HTTP_404_NOT_FOUND)
+
+    serializer = UserNotificationSettingsSerializer(instance=usuario_instance, data=request.data, partial=True)
+    if serializer.is_valid():
+        serializer.save()
+        return Response({
+            "ok": True,
+            "message": "Preferencias actualizadas.",
+            "recibir_notificaciones": serializer.data['recibir_notificaciones']
+            }, status=status.HTTP_200_OK)
+
+    return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)

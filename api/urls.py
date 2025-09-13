@@ -35,5 +35,6 @@ urlpatterns = [
     path("auth/password-reset-confirm/", views_auth.password_reset_confirm),
 
     path("", include(router.urls)),
+    path("auth/user/settings/", views_auth.auth_user_settings_update),
 
 ]

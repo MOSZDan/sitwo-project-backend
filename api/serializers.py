@@ -5,6 +5,7 @@ from .models import (
     Tipodeusuario,   # ← roles
 )
 
+
 # --------- Usuarios / Pacientes ---------
 
 class UsuarioMiniSerializer(serializers.ModelSerializer):
@@ -52,7 +53,7 @@ class RecepcionistaMiniSerializer(serializers.ModelSerializer):
 class HorarioSerializer(serializers.ModelSerializer):
     class Meta:
         model = Horario
-        fields = ("hora",)
+        fields = ("id","hora",)
 
 
 class TipodeconsultaSerializer(serializers.ModelSerializer):
@@ -70,11 +71,9 @@ class EstadodeconsultaSerializer(serializers.ModelSerializer):
 # --------- Crear / Detalle / Actualizar Consulta ---------
 
 class CreateConsultaSerializer(serializers.ModelSerializer):
-    """
-    Campos que el frontend enviará para crear una cita
-    """
     class Meta:
         model = Consulta
+        # Campos que el frontend enviará para crear una cita
         fields = (
             "fecha",
             "codpaciente",
@@ -104,6 +103,7 @@ class UpdateConsultaSerializer(serializers.ModelSerializer):
     """
     Serializador específico para actualizar solo el estado de una consulta.
     """
+
     class Meta:
         model = Consulta
         fields = ["idestadoconsulta"]
@@ -152,3 +152,11 @@ class UsuarioAdminSerializer(serializers.ModelSerializer):
                     "No puedes remover el último administrador del sistema."
                 )
         return super().update(instance, validated_data)
+
+class UserNotificationSettingsSerializer(serializers.ModelSerializer):
+    """
+    Serializer para actualizar únicamente las preferencias de notificación.
+    """
+    class Meta:
+        model = Usuario
+        fields = ['recibir_notificaciones']
