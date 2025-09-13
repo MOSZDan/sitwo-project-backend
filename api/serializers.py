@@ -108,3 +108,11 @@ class UpdateConsultaSerializer(serializers.ModelSerializer):
     class Meta:
         model = Consulta
         fields = ['idestadoconsulta']
+
+class UserNotificationSettingsSerializer(serializers.ModelSerializer):
+    """
+    Serializer para actualizar únicamente las preferencias de notificación.
+    """
+    class Meta:
+        model = Usuario
+        fields = ['recibir_notificaciones']

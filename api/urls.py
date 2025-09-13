@@ -14,7 +14,6 @@ router.register(r"odontologos", views.OdontologoViewSet, basename="odontologos")
 router.register(r"horarios", views.HorarioViewSet, basename="horarios")
 router.register(r"tipos-consulta", views.TipodeconsultaViewSet, basename="tipos-consulta")
 
-
 urlpatterns = [
     path("health/", views.health),
     path("db/", views.db_info),
@@ -32,5 +31,6 @@ urlpatterns = [
     path("auth/password-reset-confirm/", views_auth.password_reset_confirm),
 
     path("", include(router.urls)),
+    path("auth/user/settings/", views_auth.auth_user_settings_update),
 
 ]
