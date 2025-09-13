@@ -14,6 +14,9 @@ router.register(r"odontologos", views.OdontologoViewSet, basename="odontologos")
 router.register(r"horarios", views.HorarioViewSet, basename="horarios")
 router.register(r"tipos-consulta", views.TipodeconsultaViewSet, basename="tipos-consulta")
 
+# 👇 SOLO AÑADIR ESTAS DOS RUTAS (admin)
+router.register(r"tipos-usuario", views.TipodeusuarioViewSet, basename="tipos-usuario")
+router.register(r"usuarios", views.UsuarioViewSet, basename="usuarios")
 
 urlpatterns = [
     path("health/", views.health),
