@@ -86,6 +86,9 @@ class CreateConsultaSerializer(serializers.ModelSerializer):
         )
 
 
+# --------- Consulta (se mantiene igual) ---------
+# --------- Consulta ---------
+
 class ConsultaSerializer(serializers.ModelSerializer):
     codpaciente = PacienteMiniSerializer(read_only=True)
     cododontologo = OdontologoMiniSerializer(read_only=True)

@@ -118,8 +118,6 @@ class ConsultaViewSet(ModelViewSet):  # 👈 ¡CAMBIO IMPORTANTE!
                 print(f"Error al enviar correo de notificación: {e}")
 
 
-# -------------------- Catálogos de soporte --------------------
-
 class OdontologoViewSet(ReadOnlyModelViewSet):
     """Devuelve una lista de odontólogos."""
     permission_classes = [IsAuthenticated]
