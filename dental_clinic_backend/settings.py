@@ -19,14 +19,17 @@ load_dotenv(BASE_DIR / ".env")
 SECRET_KEY = os.getenv("SECRET_KEY", "dev-only-not-secret")
 DEBUG = os.getenv("DEBUG", "False") == "True"
 
+
 def _csv_env(name: str, default: list[str]) -> list[str]:
     raw = os.getenv(name, "")
     if not raw:
         return default
     return [x.strip() for x in raw.split(",") if x.strip()]
 
+
 # En prod, sobreescribe estos con variables de entorno (coma-separadas)
-ALLOWED_HOSTS = _csv_env("ALLOWED_HOSTS", ["127.0.0.1", "localhost","sitwo-project-backend-vzq2.onrender.com"])
+ALLOWED_HOSTS = _csv_env("ALLOWED_HOSTS",
+                         ["127.0.0.1", "localhost", "sitwo-project-backend-vzq2.onrender.com"])
 
 # Frontends permitidos (Vercel u otros) para CORS
 CORS_ALLOWED_ORIGINS = _csv_env(
@@ -70,7 +73,7 @@ else:
     SESSION_COOKIE_SECURE = True
     CSRF_COOKIE_SECURE = True
 
-CSRF_COOKIE_NAME = "csrftoken"   # por claridad; por defecto ya es este
+CSRF_COOKIE_NAME = "csrftoken"  # por claridad; por defecto ya es este
 # Importante para Render detrás de proxy
 SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
 # HSTS básico en prod (ajusta a tus políticas)
@@ -78,7 +81,7 @@ SECURE_HSTS_SECONDS = 0 if DEBUG else 60 * 60 * 24 * 30  # 30 días
 
 # >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
 # Evita redirección a HTTPS cuando trabajas en local (http://localhost)
-SECURE_SSL_REDIRECT = not DEBUG   # <<< añadido
+SECURE_SSL_REDIRECT = not DEBUG  # <<< añadido
 # <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
 
 # ------------------------------------
@@ -159,7 +162,7 @@ AUTH_PASSWORD_VALIDATORS = [
 LANGUAGE_CODE = "es"
 TIME_ZONE = "America/La_Paz"
 USE_I18N = True
-USE_TZ = True   # almacena en UTC, muestra en TZ
+USE_TZ = True  # almacena en UTC, muestra en TZ
 
 # ------------------------------------
 # Archivos estáticos (WhiteNoise)
@@ -200,3 +203,4 @@ EMAIL_HOST_USER = os.getenv("EMAIL_HOST_USER", "apikey")
 EMAIL_HOST_PASSWORD = os.getenv("EMAIL_HOST_PASSWORD", "")
 EMAIL_USE_TLS = os.getenv("EMAIL_USE_TLS", "True") == "True"
 EMAIL_USE_SSL = os.getenv("EMAIL_USE_SSL", "False") == "True"
+#EMAIL_BACKEND = 'django.core.mail.backends.console.EmailBackend'
