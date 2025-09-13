@@ -52,7 +52,7 @@ class RecepcionistaMiniSerializer(serializers.ModelSerializer):
 class HorarioSerializer(serializers.ModelSerializer):
     class Meta:
         model = Horario
-        fields = ("hora",)
+        fields = ("id","hora",)
 
 
 class TipodeconsultaSerializer(serializers.ModelSerializer):
