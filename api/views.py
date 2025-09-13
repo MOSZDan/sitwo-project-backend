@@ -59,7 +59,7 @@ class ConsultaViewSet(ModelViewSet):  # 👈 ¡CAMBIO IMPORTANTE!
         ).all()
     )
     filter_backends = [DjangoFilterBackend]
-    filterset_fields = ['codpaciente']
+    filterset_fields = ['codpaciente','fecha']
 
     # Esto permite usar un serializer para leer y otro para crear/actualizar
     def get_serializer_class(self):
