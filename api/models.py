@@ -16,6 +16,7 @@ class Usuario(models.Model):
     sexo = models.CharField(max_length=50, blank=True, null=True)
     telefono = models.CharField(max_length=20, blank=True, null=True)
     idtipousuario = models.ForeignKey('Tipodeusuario', models.DO_NOTHING, db_column='idtipousuario')
+    recibir_notificaciones = models.BooleanField(default=True)
 
     class Meta:
         #managed = False

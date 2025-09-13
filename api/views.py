@@ -1,7 +1,8 @@
 from django.http import JsonResponse
 from django.contrib.auth import get_user_model
 from django.db import connection
-
+from django.core.mail import send_mail
+from django.conf import settings
 from rest_framework.viewsets import ModelViewSet
 from rest_framework.permissions import IsAuthenticated
 
@@ -59,13 +60,36 @@ class ConsultaViewSet(ModelViewSet):  # 👈 ¡CAMBIO IMPORTANTE!
         ).all()
     )
     filter_backends = [DjangoFilterBackend]
-    filterset_fields = ['codpaciente','fecha']
+    filterset_fields = ['codpaciente', 'fecha']
 
     # Esto permite usar un serializer para leer y otro para crear/actualizar
     def get_serializer_class(self):
         if self.action in ['create', 'update', 'partial_update']:
             return CreateConsultaSerializer
         return ConsultaSerializer
+
+    def perform_create(self, serializer):
+        # Primero, guarda la nueva consulta
+        consulta = serializer.save()
+
+        # Ahora, envía la notificación por correo si el paciente lo permite
+        paciente = consulta.codpaciente
+        usuario_paciente = paciente.codusuario
+
+        if usuario_paciente.recibir_notificaciones:
+            try:
+                # Asunto y mensaje del correo
+                subject = "Confirmación de tu cita en Clínica Dental"
+                message = f"Hola {usuario_paciente.nombre}, tu cita para el día {consulta.fecha.strftime('%d/%m/%Y')} a las {consulta.idhorario.hora.strftime('%H:%M')} ha sido confirmada."
+                from_email = settings.DEFAULT_FROM_EMAIL
+                recipient_list = [usuario_paciente.correoelectronico]
+
+                # Envía el correo
+                send_mail(subject, message, from_email, recipient_list, fail_silently=False)
+
+            except Exception as e:
+                # Opcional: registrar el error si el correo no se pudo enviar
+                print(f"Error al enviar correo de notificación: {e}")
 
 
 class OdontologoViewSet(ReadOnlyModelViewSet):
