@@ -1,7 +1,8 @@
 from rest_framework import serializers
 from .models import (
     Usuario, Paciente, Odontologo, Recepcionista,
-    Horario, Tipodeconsulta, Estadodeconsulta, Consulta
+    Horario, Tipodeconsulta, Estadodeconsulta, Consulta,
+    Tipodeusuario,   # ← roles
 )
 
 
@@ -67,20 +68,21 @@ class EstadodeconsultaSerializer(serializers.ModelSerializer):
         fields = ("id", "estado")
 
 
-# --------- NUEVO SERIALIZER PARA CREAR CONSULTAS ---------
+# --------- Crear / Detalle / Actualizar Consulta ---------
+
 class CreateConsultaSerializer(serializers.ModelSerializer):
     class Meta:
         model = Consulta
         # Campos que el frontend enviará para crear una cita
         fields = (
-            'fecha',
-            'codpaciente',
-            'cododontologo',
-            'idhorario',
-            'idtipoconsulta',
-            'idestadoconsulta',
-            # El codrecepcionista es opcional
-            'codrecepcionista',
+            "fecha",
+            "codpaciente",
+            "cododontologo",
+            "idhorario",
+            "idtipoconsulta",
+            "idestadoconsulta",
+            # opcional
+            "codrecepcionista",
         )
 
 
@@ -107,7 +109,52 @@ class UpdateConsultaSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Consulta
-        fields = ['idestadoconsulta']
+        fields = ["idestadoconsulta"]
+
+
+# --------- ADMIN: Roles y Usuarios (lista + cambio de rol) ---------
+
+class TipodeusuarioSerializer(serializers.ModelSerializer):
+    # 'identificacion' visible en la API, tomado del PK real 'id'
+    identificacion = serializers.IntegerField(source="id", read_only=True)
+
+    class Meta:
+        model = Tipodeusuario
+        fields = ("identificacion", "rol", "descripcion")
+
+
+class UsuarioAdminSerializer(serializers.ModelSerializer):
+    rol = serializers.CharField(source="idtipousuario.rol", read_only=True)
+    idtipousuario = serializers.PrimaryKeyRelatedField(
+        queryset=Tipodeusuario.objects.all(), required=False
+    )
+
+    class Meta:
+        model = Usuario
+        fields = (
+            "codigo",
+            "nombre",
+            "apellido",
+            "correoelectronico",
+            "idtipousuario",
+            "rol",
+        )
+        read_only_fields = ("codigo",)
+
+    def update(self, instance, validated_data):
+        new_role = validated_data.get("idtipousuario")
+        if new_role and instance.idtipousuario_id == 1 and new_role.id != 1:
+            remaining_admins = (
+                Usuario.objects
+                .filter(idtipousuario_id=1)
+                .exclude(pk=instance.pk)
+                .count()
+            )
+            if remaining_admins == 0:
+                raise serializers.ValidationError(
+                    "No puedes remover el último administrador del sistema."
+                )
+        return super().update(instance, validated_data)
 
 class UserNotificationSettingsSerializer(serializers.ModelSerializer):
     """
