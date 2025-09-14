@@ -9,11 +9,13 @@ from rest_framework.viewsets import ModelViewSet, ReadOnlyModelViewSet
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.filters import SearchFilter, OrderingFilter
 from rest_framework.response import Response
+from rest_framework.decorators import action
 from django_filters.rest_framework import DjangoFilterBackend
 
 from .models import (
     Paciente, Consulta, Odontologo, Horario, Tipodeconsulta,
     Usuario, Tipodeusuario,
+    Vista,  # ← NUEVO
 )
 
 from .serializers import (
@@ -27,6 +29,7 @@ from .serializers import (
     # Admin
     UsuarioAdminSerializer,
     TipodeusuarioSerializer,
+    VistaSerializer,  # ← NUEVO
 )
 
 # -------------------- Health / Utils --------------------
@@ -51,6 +54,17 @@ def users_count(request):
     """
     User = get_user_model()
     return JsonResponse({"count": User.objects.count()})
+
+
+# Helper reutilizable: ¿el usuario actual es admin en la tabla de negocio?
+def _es_admin_por_tabla(dj_user) -> bool:
+    email = (getattr(dj_user, "email", None) or getattr(dj_user, "username", "")).strip().lower()
+    if not email:
+        return False
+    return Usuario.objects.filter(
+        correoelectronico__iexact=email,
+        idtipousuario_id=1  # 1 = Administrador
+    ).exists()
 
 
 # -------------------- Pacientes --------------------
@@ -159,16 +173,6 @@ class UsuarioViewSet(ModelViewSet):
     lookup_field = "codigo"
     http_method_names = ["get", "patch", "head", "options"]
 
-    # --- Helper: considera admin si en la tabla de negocio tiene idtipousuario_id == 1 ---
-    def _es_admin_por_tabla(self, dj_user) -> bool:
-        email = (getattr(dj_user, "email", None) or getattr(dj_user, "username", "")).strip().lower()
-        if not email:
-            return False
-        return Usuario.objects.filter(
-            correoelectronico__iexact=email,
-            idtipousuario_id=1  # 1 = Administrador (ajusta si tu ID difiere)
-        ).exists()
-
     def partial_update(self, request, *args, **kwargs):
         """
         Autorización: solo administradores pueden cambiar roles.
@@ -176,9 +180,50 @@ class UsuarioViewSet(ModelViewSet):
         """
         user = request.user
         is_staff = getattr(user, "is_staff", False)
-        es_admin_tabla = self._es_admin_por_tabla(user)
+        es_admin_tabla = _es_admin_por_tabla(user)
 
         if not (is_staff or es_admin_tabla):
             return Response({"detail": "Solo administradores pueden cambiar roles."}, status=403)
 
         return super().partial_update(request, *args, **kwargs)
+
+
+# -------------------- NUEVO: Gestionar Permisos (Vistas) --------------------
+
+class VistaViewSet(ModelViewSet):
+    """
+    Administra las vistas (páginas) y los roles que pueden acceder.
+    - GET list/retrieve: autenticado
+    - POST/PATCH/DELETE: solo administradores (tabla o is_staff)
+    - mis-vistas: vistas permitidas al usuario logueado (por su rol)
+    """
+    permission_classes = [IsAuthenticated]
+    queryset = Vista.objects.prefetch_related("roles_permitidos").all()
+    serializer_class = VistaSerializer
+    pagination_class = None
+    http_method_names = ["get", "post", "patch", "delete", "head", "options"]
+
+    def create(self, request, *args, **kwargs):
+        if not (getattr(request.user, "is_staff", False) or _es_admin_por_tabla(request.user)):
+            return Response({"detail": "Solo administradores."}, status=403)
+        return super().create(request, *args, **kwargs)
+
+    def partial_update(self, request, *args, **kwargs):
+        if not (getattr(request.user, "is_staff", False) or _es_admin_por_tabla(request.user)):
+            return Response({"detail": "Solo administradores."}, status=403)
+        return super().partial_update(request, *args, **kwargs)
+
+    def destroy(self, request, *args, **kwargs):
+        if not (getattr(request.user, "is_staff", False) or _es_admin_por_tabla(request.user)):
+            return Response({"detail": "Solo administradores."}, status=403)
+        return super().destroy(request, *args, **kwargs)
+
+    @action(detail=False, methods=["get"], url_path="mis-vistas")
+    def mis_vistas(self, request):
+        dom = getattr(request.user, "usuario", None)
+        rol_id = getattr(dom, "idtipousuario_id", None)
+        if not rol_id:
+            return Response([], status=200)
+        vistas = self.get_queryset().filter(roles_permitidos__id=rol_id)
+        data = VistaSerializer(vistas, many=True).data
+        return Response(data, status=200)

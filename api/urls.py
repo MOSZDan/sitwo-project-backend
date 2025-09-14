@@ -17,7 +17,7 @@ router.register(r"tipos-consulta", views.TipodeconsultaViewSet, basename="tipos-
 # 👇 SOLO AÑADIR ESTAS DOS RUTAS (admin)
 router.register(r"tipos-usuario", views.TipodeusuarioViewSet, basename="tipos-usuario")
 router.register(r"usuarios", views.UsuarioViewSet, basename="usuarios")
-
+router.register(r"vistas", views.VistaViewSet, basename="vistas")
 urlpatterns = [
     path("health/", views.health),
     path("db/", views.db_info),
