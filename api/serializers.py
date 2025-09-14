@@ -2,9 +2,10 @@ from rest_framework import serializers
 from .models import (
     Usuario, Paciente, Odontologo, Recepcionista,
     Horario, Tipodeconsulta, Estadodeconsulta, Consulta,
-    Tipodeusuario,   # ← roles
-    Vista,           # ← NUEVO: para gestión de permisos
+    Tipodeusuario,  # ← roles
+    Vista,  # ← NUEVO: para gestión de permisos
 )
+
 
 # --------- Usuarios / Pacientes ---------
 
@@ -105,6 +106,7 @@ class UpdateConsultaSerializer(serializers.ModelSerializer):
     """
     Serializador específico para actualizar solo el estado de una consulta.
     """
+
     class Meta:
         model = Consulta
         fields = ["idestadoconsulta"]
@@ -137,7 +139,7 @@ class UsuarioAdminSerializer(serializers.ModelSerializer):
             "idtipousuario",
             "rol",
         )
-    # 'codigo' viene de BD/negocio, lo dejamos de solo lectura si así lo manejan
+        # 'codigo' viene de BD/negocio, lo dejamos de solo lectura si así lo manejan
         read_only_fields = ("codigo",)
 
     def update(self, instance, validated_data):
@@ -160,6 +162,7 @@ class UserNotificationSettingsSerializer(serializers.ModelSerializer):
     """
     Serializer para actualizar únicamente las preferencias de notificación.
     """
+
     class Meta:
         model = Usuario
         fields = ['recibir_notificaciones']
@@ -184,3 +187,18 @@ class VistaSerializer(serializers.ModelSerializer):
             "descripcion",
             "roles_permitidos",
         )
+
+
+# --------- PERFIL (GET/PATCH de la propia fila en `usuario`) ---------
+
+class UsuarioMeSerializer(serializers.Serializer):
+    """
+    Campos editables desde el modal de Perfil.
+    - Dejamos 'codigo' e 'idtipousuario' como solo-lectura por seguridad.
+    """
+    nombre = serializers.CharField(required=False, allow_blank=True)
+    apellido = serializers.CharField(required=False, allow_blank=True)
+    correoelectronico = serializers.EmailField(required=False)
+    sexo = serializers.ChoiceField(choices=["M", "F"], required=False, allow_null=True)
+    telefono = serializers.CharField(required=False, allow_blank=True, allow_null=True)
+    recibir_notificaciones = serializers.BooleanField(required=False)

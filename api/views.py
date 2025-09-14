@@ -2,6 +2,10 @@
 from django.http import JsonResponse
 from django.contrib.auth import get_user_model
 from django.db import connection
+from django.views.decorators.csrf import csrf_exempt
+from django.views.decorators.http import require_http_methods
+
+from rest_framework.viewsets import ModelViewSet
 from django.core.mail import send_mail
 from django.conf import settings
 
@@ -12,11 +16,11 @@ from rest_framework.response import Response
 from rest_framework.decorators import action
 from django_filters.rest_framework import DjangoFilterBackend
 
-from .models import (
-    Paciente, Consulta, Odontologo, Horario, Tipodeconsulta,
-    Usuario, Tipodeusuario,
-    Vista,  # ← NUEVO
-)
+from .models import ( Paciente, Consulta, Odontologo, Horario, Tipodeconsulta,
+Usuario, Tipodeusuario, Vista )
+# Asegúrate de importar también los nuevos serializers que crearemos
+from .serializers import PacienteSerializer, ConsultaSerializer, CreateConsultaSerializer, OdontologoMiniSerializer, \
+    HorarioSerializer, TipodeconsultaSerializer
 
 from .serializers import (
     PacienteSerializer,
@@ -34,24 +38,25 @@ from .serializers import (
 
 # -------------------- Health / Utils --------------------
 
+@csrf_exempt
+@require_http_methods(["GET"])
 def health(request):
     """Ping de salud"""
     return JsonResponse({"ok": True})
 
-
+@csrf_exempt
+@require_http_methods(["GET"])
 def db_info(request):
-    """Info rápida de la conexión a DB (útil en dev/diagnóstico)."""
+    """Info rápida de la conexión a DB"""
     with connection.cursor() as cur:
         cur.execute("select current_database(), current_user")
         db, user = cur.fetchone()
     return JsonResponse({"database": db, "user": user})
 
-
+@csrf_exempt
+@require_http_methods(["GET"])
 def users_count(request):
-    """
-    Cuenta de usuarios del auth de Django (tabla auth_user).
-    NOTA: devolvemos 'count' para cuadrar con el frontend.
-    """
+    """Cuenta de usuarios del auth de Django"""
     User = get_user_model()
     return JsonResponse({"count": User.objects.count()})
 
@@ -79,11 +84,9 @@ class PacienteViewSet(ReadOnlyModelViewSet):
     serializer_class = PacienteSerializer
 
 
-# -------------------- Consultas (Citas) --------------------
-
-class ConsultaViewSet(ModelViewSet):
+class ConsultaViewSet(ModelViewSet):  # 👈 ¡CAMBIO IMPORTANTE!
     """
-    API para Consultas. Permite crear, leer, actualizar y eliminar.
+    API para Consultas. Ahora permite crear, leer, actualizar y eliminar.
     """
     permission_classes = [IsAuthenticated]
     queryset = (
@@ -106,7 +109,7 @@ class ConsultaViewSet(ModelViewSet):
             return UpdateConsultaSerializer
         return ConsultaSerializer
 
-    def perform_create(self, serializer):
+def perform_create(self, serializer):
         consulta = serializer.save()
 
         paciente = consulta.codpaciente
@@ -125,10 +128,6 @@ class ConsultaViewSet(ModelViewSet):
                 send_mail(subject, message, from_email, recipient_list, fail_silently=False)
             except Exception as e:
                 print(f"Error al enviar correo de notificación: {e}")
-
-
-# -------------------- Catálogos --------------------
-
 class OdontologoViewSet(ReadOnlyModelViewSet):
     permission_classes = [IsAuthenticated]
     queryset = Odontologo.objects.all()
