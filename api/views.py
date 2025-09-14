@@ -4,6 +4,9 @@ from django.contrib.auth import get_user_model
 from django.db import connection
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_http_methods
+from rest_framework.generics import RetrieveUpdateAPIView
+
+from .serializers import UsuarioMeSerializer
 
 from rest_framework.viewsets import ModelViewSet
 from django.core.mail import send_mail
@@ -15,7 +18,7 @@ from rest_framework.filters import SearchFilter, OrderingFilter
 from rest_framework.response import Response
 from rest_framework.decorators import action
 from django_filters.rest_framework import DjangoFilterBackend
-
+from .models import Usuario
 from .models import ( Paciente, Consulta, Odontologo, Horario, Tipodeconsulta,
 Usuario, Tipodeusuario, Vista )
 # Asegúrate de importar también los nuevos serializers que crearemos
@@ -226,3 +229,30 @@ class VistaViewSet(ModelViewSet):
         vistas = self.get_queryset().filter(roles_permitidos__id=rol_id)
         data = VistaSerializer(vistas, many=True).data
         return Response(data, status=200)
+
+
+class UserProfileView(RetrieveUpdateAPIView):
+    """
+    Vista para leer y actualizar los datos del perfil del usuario autenticado.
+    Soporta GET, PUT y PATCH.
+    """
+    serializer_class = UsuarioMeSerializer
+    permission_classes = [IsAuthenticated]
+
+    def get_object(self):
+        """
+        ¡ESTA ES LA CORRECCIÓN!
+        En lugar de devolver request.user directamente, buscamos el perfil 'Usuario'
+        que está vinculado a ese usuario de autenticación.
+        """
+        # self.request.user es el usuario de Django Auth.
+        # Buscamos en nuestro modelo 'Usuario' el que tenga el 'correoelectronico'
+        # que coincida con el email del usuario autenticado.
+        # Usamos .get() para obtener el objeto único.
+        try:
+            # Asumimos que el email es el vínculo entre User y Usuario
+            usuario_perfil = Usuario.objects.get(correoelectronico__iexact=self.request.user.email)
+            return usuario_perfil
+        except Usuario.DoesNotExist:
+            # Esto no debería pasar si cada User tiene un Usuario, pero es una buena práctica manejarlo
+            return None
