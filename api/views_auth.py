@@ -7,23 +7,24 @@ from django.contrib.auth.tokens import default_token_generator
 from django.utils.encoding import force_bytes, force_str
 from django.utils.http import urlsafe_base64_encode, urlsafe_base64_decode
 from django.core.mail import EmailMultiAlternatives
+from django.core.exceptions import ObjectDoesNotExist, MultipleObjectsReturned
 from django.conf import settings
 from django.db import transaction, IntegrityError, DatabaseError
-from .serializers import UserNotificationSettingsSerializer
-from .models import Usuario, Paciente, Odontologo, Recepcionista
-from .serializers import UserNotificationSettingsSerializer
+
 from rest_framework import status
 from rest_framework.decorators import (
     api_view,
     permission_classes,
     authentication_classes,
 )
-from rest_framework.permissions import AllowAny
+from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.authtoken.models import Token
+from rest_framework.views import APIView
 
-from .serializers_auth import RegisterSerializer
 from .models import Usuario, Paciente, Odontologo, Recepcionista
+from .serializers import UserNotificationSettingsSerializer, UsuarioMeSerializer
+from .serializers_auth import RegisterSerializer
 
 User = get_user_model()
 
@@ -87,11 +88,9 @@ def auth_register(request):
             # Nombres (hasta 150 chars)
             update_fields = []
             if nombre:
-                dj_user.first_name = nombre[:150];
-                update_fields.append("first_name")
+                dj_user.first_name = nombre[:150]; update_fields.append("first_name")
             if apellido:
-                dj_user.last_name = apellido[:150];
-                update_fields.append("last_name")
+                dj_user.last_name = apellido[:150]; update_fields.append("last_name")
             if update_fields:
                 dj_user.save(update_fields=update_fields)
 
@@ -109,20 +108,15 @@ def auth_register(request):
             if not created:
                 changed = False
                 if usuario.idtipousuario_id != idtu:
-                    usuario.idtipousuario_id = idtu;
-                    changed = True
+                    usuario.idtipousuario_id = idtu; changed = True
                 if nombre and usuario.nombre != nombre:
-                    usuario.nombre = nombre;
-                    changed = True
+                    usuario.nombre = nombre; changed = True
                 if apellido and usuario.apellido != apellido:
-                    usuario.apellido = apellido;
-                    changed = True
+                    usuario.apellido = apellido; changed = True
                 if telefono is not None and usuario.telefono != telefono:
-                    usuario.telefono = telefono;
-                    changed = True
+                    usuario.telefono = telefono; changed = True
                 if sexo is not None and usuario.sexo != sexo:
-                    usuario.sexo = sexo;
-                    changed = True
+                    usuario.sexo = sexo; changed = True
                 if changed:
                     usuario.save()
 
@@ -335,13 +329,10 @@ def password_reset_request(request):
                 to=[user.email],
             )
             msg.attach_alternative(html_content, "text/html")
-            # Si el backend de correo no está configurado, evita tirar 500:
             msg.send(fail_silently=True)
         except Exception:
-            # No filtramos detalles; mantenemos respuesta genérica
             pass
 
-    # Respuesta uniforme (exista o no el email)
     return Response({"ok": True, "message": generic_msg}, status=status.HTTP_200_OK)
 
 
@@ -374,6 +365,7 @@ def password_reset_confirm(request):
     return Response({"ok": True, "message": "Contraseña actualizada correctamente"}, status=status.HTTP_200_OK)
 
 
+# ============================
 # Preferencias de Usuario
 # ============================
 @api_view(["PATCH"])
@@ -400,3 +392,88 @@ def auth_user_settings_update(request):
             }, status=status.HTTP_200_OK)
 
     return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+
+# ============================
+# Perfil de Usuario (GET/PATCH)
+# ============================
+class UsuarioMeView(APIView):
+    """
+    GET   /api/usuario/me  -> devuelve la fila en `usuario` del usuario autenticado
+    PATCH /api/usuario/me  -> actualiza campos permitidos; sincroniza auth_user.email si cambia `correoelectronico`
+    Vincula por: auth_user.email == usuario.correoelectronico (case-insensitive)
+    """
+    permission_classes = [IsAuthenticated]
+
+    def _resolve_email(self, request) -> str:
+        email = (getattr(request.user, "email", "") or "").strip()
+        if not email:
+            username = (getattr(request.user, "username", "") or "").strip()
+            if "@" in username:
+                email = username
+        return email
+
+    def _get_row(self, request) -> Usuario:
+        email = self._resolve_email(request)
+        if not email:
+            raise ObjectDoesNotExist("El usuario autenticado no tiene email.")
+        try:
+            return Usuario.objects.get(correoelectronico__iexact=email)
+        except MultipleObjectsReturned:
+            return Usuario.objects.filter(correoelectronico__iexact=email).order_by("codigo").first()
+
+    def _serialize(self, u: Usuario) -> dict:
+        return {
+            "codigo": u.codigo,
+            "nombre": u.nombre,
+            "apellido": u.apellido,
+            "correoelectronico": u.correoelectronico,
+            "sexo": u.sexo,
+            "telefono": u.telefono,
+            "idtipousuario": u.idtipousuario_id,
+            "recibir_notificaciones": u.recibir_notificaciones,
+        }
+
+    def get(self, request):
+        try:
+            u = self._get_row(request)
+        except ObjectDoesNotExist:
+            return Response({"detail": "No se encontró tu fila en 'usuario' (correo no coincide)."}, status=404)
+        return Response(self._serialize(u))
+
+    @transaction.atomic
+    def patch(self, request):
+        try:
+            u = self._get_row(request)
+        except ObjectDoesNotExist:
+            return Response({"detail": "No se encontró tu fila en 'usuario' (correo no coincide)."}, status=404)
+
+        ser = UsuarioMeSerializer(data=request.data, partial=True)
+        ser.is_valid(raise_exception=True)
+        data = ser.validated_data
+
+        allowed = {"nombre", "apellido", "correoelectronico", "sexo", "telefono", "recibir_notificaciones"}
+
+        # Evitar duplicar correos (la BD también lo asegura con unique=True)
+        nuevo_correo = data.get("correoelectronico")
+        if nuevo_correo and Usuario.objects.exclude(pk=u.pk).filter(correoelectronico__iexact=nuevo_correo).exists():
+            return Response({"detail": "Ese correo ya está registrado."}, status=status.HTTP_400_BAD_REQUEST)
+
+        # Asignar cambios permitidos
+        for k, v in data.items():
+            if k in allowed:
+                setattr(u, k, v)
+        u.save()
+
+        # Si cambió correo, sincronizar auth_user
+        if nuevo_correo:
+            auth_user = User.objects.get(pk=request.user.pk)
+            auth_user.email = nuevo_correo
+            try:
+                if getattr(auth_user, "username", None) and "@" in (auth_user.username or ""):
+                    auth_user.username = nuevo_correo
+                auth_user.save(update_fields=["email", "username"])
+            except Exception:
+                auth_user.save(update_fields=["email"])
+
+        return Response(self._serialize(u), status=200)

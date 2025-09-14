@@ -109,7 +109,7 @@ class ConsultaViewSet(ModelViewSet):  # 👈 ¡CAMBIO IMPORTANTE!
             return UpdateConsultaSerializer
         return ConsultaSerializer
 
-   def perform_create(self, serializer):
+def perform_create(self, serializer):
         consulta = serializer.save()
 
         paciente = consulta.codpaciente
