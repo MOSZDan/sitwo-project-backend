@@ -16,7 +16,8 @@ class Usuario(models.Model):
     telefono = models.CharField(max_length=20, blank=True, null=True)
     idtipousuario = models.ForeignKey('Tipodeusuario', models.DO_NOTHING, db_column='idtipousuario')
     recibir_notificaciones = models.BooleanField(default=True)
-
+    notificaciones_email = models.BooleanField(default=True)
+    notificaciones_push = models.BooleanField(default=False)
     class Meta:
         #managed = False
         db_table = 'usuario'

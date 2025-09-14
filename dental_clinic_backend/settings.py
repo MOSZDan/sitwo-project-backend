@@ -17,7 +17,7 @@ load_dotenv(BASE_DIR / ".env")
 # Seguridad / Debug
 # ------------------------------------
 SECRET_KEY = os.getenv("SECRET_KEY", "dev-only-not-secret")
-DEBUG = os.getenv("DEBUG", "False") == "True"
+DEBUG = os.getenv("DEBUG", "False").lower() == "true"
 
 
 def _csv_env(name: str, default: list[str]) -> list[str]:
@@ -27,27 +27,32 @@ def _csv_env(name: str, default: list[str]) -> list[str]:
     return [x.strip() for x in raw.split(",") if x.strip()]
 
 
-# En prod, sobreescribe estos con variables de entorno (coma-separadas)
-ALLOWED_HOSTS = _csv_env("ALLOWED_HOSTS",
-                         ["127.0.0.1", "localhost", "sitwo-project-backend-vzq2.onrender.com"])
+# Configuración de CORS y hosts dependiendo del entorno
+if DEBUG:
+    # En desarrollo - permitir todos los orígenes (para Flutter web con puertos dinámicos)
+    CORS_ALLOW_ALL_ORIGINS = True
+    CORS_ALLOW_CREDENTIALS = True
+    ALLOWED_HOSTS = ["*"]
+    SESSION_COOKIE_SAMESITE = "Lax"
+    CSRF_COOKIE_SAMESITE = "Lax"
+    SESSION_COOKIE_SECURE = False
+    CSRF_COOKIE_SECURE = False
+else:
+    # En producción - configuración estricta
+    CORS_ALLOW_ALL_ORIGINS = False
+    CORS_ALLOWED_ORIGINS = _csv_env(
+        "CORS_ALLOWED_ORIGINS",
+        ["https://sitwo-project.onrender.com"]
+    )
+    CORS_ALLOW_CREDENTIALS = True
+    ALLOWED_HOSTS = _csv_env("ALLOWED_HOSTS",
+                             ["127.0.0.1", "localhost", "sitwo-project-backend-vzq2.onrender.com"])
+    SESSION_COOKIE_SAMESITE = os.getenv("SESSION_COOKIE_SAMESITE", "None")
+    CSRF_COOKIE_SAMESITE = os.getenv("CSRF_COOKIE_SAMESITE", "None")
+    SESSION_COOKIE_SECURE = True
+    CSRF_COOKIE_SECURE = True
 
-# Frontends permitidos (Vercel u otros) para CORS
-CORS_ALLOWED_ORIGINS = _csv_env(
-    "CORS_ALLOWED_ORIGINS",
-    [
-        "http://127.0.0.1:5173",
-        "http://localhost:5173",
-        "http://127.0.0.1:5174",
-        "http://localhost:5174",
-        "http://127.0.0.1:3000",
-        "http://localhost:3000",
-        "https://sitwo-project.onrender.com"
-
-    ],
-)
-CORS_ALLOW_CREDENTIALS = True
-
-# Orígenes confiables para CSRF (incluye tu frontend y, si quieres, tu backend)
+# Orígenes confiables para CSRF
 CSRF_TRUSTED_ORIGINS = _csv_env(
     "CSRF_TRUSTED_ORIGINS",
     [
@@ -55,34 +60,23 @@ CSRF_TRUSTED_ORIGINS = _csv_env(
         "http://localhost:8000",
         "http://127.0.0.1:5173",
         "http://localhost:5173",
-        "http://127.0.0.1:5174",
-        "http://localhost:5174",
         "http://127.0.0.1:3000",
         "http://localhost:3000",
-        "https://sitwo-project.onrender.com",  # ← AGREGAR ESTA LÍNEA
+        "https://sitwo-project.onrender.com",
+    ] if not DEBUG else [
+        "http://127.0.0.1:8000",
+        "http://localhost:8000",
+        "http://127.0.0.1:5173",
+        "http://localhost:5173",
+        "http://127.0.0.1:3000",
+        "http://localhost:3000",
     ],
 )
-if DEBUG:
-    SESSION_COOKIE_SAMESITE = "Lax"
-    CSRF_COOKIE_SAMESITE = "Lax"
-    SESSION_COOKIE_SECURE = False
-    CSRF_COOKIE_SECURE = False
-else:
-    SESSION_COOKIE_SAMESITE = os.getenv("SESSION_COOKIE_SAMESITE", "None")
-    CSRF_COOKIE_SAMESITE = os.getenv("CSRF_COOKIE_SAMESITE", "None")
-    SESSION_COOKIE_SECURE = True
-    CSRF_COOKIE_SECURE = True
 
-CSRF_COOKIE_NAME = "csrftoken"  # por claridad; por defecto ya es este
-# Importante para Render detrás de proxy
+CSRF_COOKIE_NAME = "csrftoken"
 SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
-# HSTS básico en prod (ajusta a tus políticas)
 SECURE_HSTS_SECONDS = 0 if DEBUG else 60 * 60 * 24 * 30  # 30 días
-
-# >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
-# Evita redirección a HTTPS cuando trabajas en local (http://localhost)
-SECURE_SSL_REDIRECT = not DEBUG  # <<< añadido
-# <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+SECURE_SSL_REDIRECT = not DEBUG
 
 # ------------------------------------
 # Apps
@@ -97,7 +91,7 @@ INSTALLED_APPS = [
     "django.contrib.staticfiles",
     "rest_framework",
     'django_filters',
-    "rest_framework.authtoken",  # <- AGREGADO para Token Authentication
+    "rest_framework.authtoken",
     "api",
 ]
 
@@ -162,7 +156,7 @@ AUTH_PASSWORD_VALIDATORS = [
 LANGUAGE_CODE = "es"
 TIME_ZONE = "America/La_Paz"
 USE_I18N = True
-USE_TZ = True  # almacena en UTC, muestra en TZ
+USE_TZ = True
 
 # ------------------------------------
 # Archivos estáticos (WhiteNoise)
@@ -172,13 +166,13 @@ STATIC_ROOT = BASE_DIR / "staticfiles"
 STATICFILES_STORAGE = "whitenoise.storage.CompressedManifestStaticFilesStorage"
 
 # ------------------------------------
-# DRF - CORREGIDO
+# DRF
 # ------------------------------------
 REST_FRAMEWORK = {
     "DEFAULT_PERMISSION_CLASSES": ["rest_framework.permissions.IsAuthenticated"],
     "DEFAULT_AUTHENTICATION_CLASSES": [
-        "rest_framework.authentication.TokenAuthentication",  # <- CAMBIADO: Token Auth principal
-        "rest_framework.authentication.SessionAuthentication",  # <- Mantiene sesiones Django
+        "rest_framework.authentication.TokenAuthentication",
+        "rest_framework.authentication.SessionAuthentication",
     ],
     "DEFAULT_PAGINATION_CLASS": "rest_framework.pagination.PageNumberPagination",
     "PAGE_SIZE": 25,
@@ -190,11 +184,10 @@ REST_FRAMEWORK = {
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
 # ------------------------------------
-# Frontend y Email (para recuperar contraseña)
+# Frontend y Email
 # ------------------------------------
 FRONTEND_URL = os.getenv("FRONTEND_URL", "https://sitwo-project.onrender.com")
-
-EFAULT_FROM_EMAIL = os.getenv("DEFAULT_FROM_EMAIL", "no-reply@clinica.local")
+DEFAULT_FROM_EMAIL = os.getenv("DEFAULT_FROM_EMAIL", "no-reply@clinica.local")
 
 EMAIL_BACKEND = os.getenv("EMAIL_BACKEND", "django.core.mail.backends.smtp.EmailBackend")
 EMAIL_HOST = os.getenv("EMAIL_HOST", "smtp.resend.com")
@@ -203,4 +196,30 @@ EMAIL_HOST_USER = os.getenv("EMAIL_HOST_USER", "apikey")
 EMAIL_HOST_PASSWORD = os.getenv("EMAIL_HOST_PASSWORD", "")
 EMAIL_USE_TLS = os.getenv("EMAIL_USE_TLS", "True") == "True"
 EMAIL_USE_SSL = os.getenv("EMAIL_USE_SSL", "False") == "True"
-#EMAIL_BACKEND = 'django.core.mail.backends.console.EmailBackend'
+
+# Logging detallado
+LOGGING = {
+    'version': 1,
+    'disable_existing_loggers': False,
+    'handlers': {
+        'console': {
+            'class': 'logging.StreamHandler',
+        },
+    },
+    'root': {
+        'handlers': ['console'],
+        'level': 'DEBUG',
+    },
+    'loggers': {
+        'django': {
+            'handlers': ['console'],
+            'level': 'DEBUG',
+            'propagate': False,
+        },
+        'django.request': {
+            'handlers': ['console'],
+            'level': 'DEBUG',
+            'propagate': False,
+        },
+    },
+}

@@ -3,21 +3,17 @@ from django.urls import path, include
 from rest_framework.routers import DefaultRouter
 from . import views, views_auth
 
+# ← SOLO UNA DEFINICIÓN DEL ROUTER
 router = DefaultRouter()
 router.register(r"pacientes", views.PacienteViewSet, basename="pacientes")
 router.register(r"consultas", views.ConsultaViewSet, basename="consultas")
-router = DefaultRouter()
-router.register(r"pacientes", views.PacienteViewSet, basename="pacientes")
-router.register(r"consultas", views.ConsultaViewSet, basename="consultas")
-# 👇 AÑADE ESTAS NUEVAS RUTAS
 router.register(r"odontologos", views.OdontologoViewSet, basename="odontologos")
 router.register(r"horarios", views.HorarioViewSet, basename="horarios")
 router.register(r"tipos-consulta", views.TipodeconsultaViewSet, basename="tipos-consulta")
-
-# 👇 SOLO AÑADIR ESTAS DOS RUTAS (admin)
 router.register(r"tipos-usuario", views.TipodeusuarioViewSet, basename="tipos-usuario")
 router.register(r"usuarios", views.UsuarioViewSet, basename="usuarios")
 router.register(r"vistas", views.VistaViewSet, basename="vistas")
+
 urlpatterns = [
     path("health/", views.health),
     path("db/", views.db_info),
@@ -34,7 +30,10 @@ urlpatterns = [
     path("auth/password-reset/", views_auth.password_reset_request),
     path("auth/password-reset-confirm/", views_auth.password_reset_confirm),
 
-    path("", include(router.urls)),
+    # Preferencias de usuario
     path("auth/user/settings/", views_auth.auth_user_settings_update),
+    path("auth/user/notifications/", views_auth.notification_preferences),
 
+    # Router al final
+    path("", include(router.urls)),
 ]

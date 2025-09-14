@@ -112,19 +112,44 @@ class ConsultaViewSet(ModelViewSet):
         paciente = consulta.codpaciente
         usuario_paciente = paciente.codusuario
 
-        if getattr(usuario_paciente, "recibir_notificaciones", False):
+        # Verificar si el usuario quiere recibir notificaciones por email
+        if getattr(usuario_paciente, "notificaciones_email", False):
             try:
                 subject = "Confirmación de tu cita en Clínica Dental"
-                message = (
-                    f"Hola {usuario_paciente.nombre}, tu cita para el día "
-                    f"{consulta.fecha.strftime('%d/%m/%Y')} a las "
-                    f"{consulta.idhorario.hora.strftime('%H:%M')} ha sido confirmada."
-                )
+
+                # Formatear fecha en español
+                fecha_formateada = consulta.fecha.strftime('%d de %B de %Y')
+                hora_formateada = consulta.idhorario.hora.strftime('%H:%M')
+
+                # Mensaje más completo
+                message = f"""
+    Hola {usuario_paciente.nombre},
+
+    Tu cita ha sido agendada exitosamente con los siguientes detalles:
+
+    📅 Fecha: {fecha_formateada}
+    🕐 Hora: {hora_formateada}
+    👨‍⚕️ Odontólogo: Dr. {consulta.cododontologo.codusuario.nombre} {consulta.cododontologo.codusuario.apellido}
+    🦷 Tipo de consulta: {consulta.idtipoconsulta.nombreconsulta}
+
+    Recuerda llegar 15 minutos antes de tu cita.
+
+    ¡Te esperamos en Smile Studio!
+
+    Si necesitas cancelar o reprogramar tu cita, ponte en contacto con nosotros.
+                """
+
                 from_email = settings.DEFAULT_FROM_EMAIL
                 recipient_list = [usuario_paciente.correoelectronico]
+
                 send_mail(subject, message, from_email, recipient_list, fail_silently=False)
+
             except Exception as e:
                 print(f"Error al enviar correo de notificación: {e}")
+
+        # Aquí se puede agregar lógica para notificaciones push en el futuro
+        # if getattr(usuario_paciente, "notificaciones_push", False):
+        #     send_push_notification(usuario_paciente, consulta)
 
 
 # -------------------- Catálogos --------------------

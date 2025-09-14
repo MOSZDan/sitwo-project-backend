@@ -184,3 +184,19 @@ class VistaSerializer(serializers.ModelSerializer):
             "descripcion",
             "roles_permitidos",
         )
+
+#para notificaciones
+class NotificationPreferencesSerializer(serializers.ModelSerializer):
+    """
+    Serializer para gestionar las preferencias de notificaciones del usuario.
+    """
+
+    class Meta:
+        model = Usuario
+        fields = ['notificaciones_email', 'notificaciones_push']
+
+    def update(self, instance, validated_data):
+        instance.notificaciones_email = validated_data.get('notificaciones_email', instance.notificaciones_email)
+        instance.notificaciones_push = validated_data.get('notificaciones_push', instance.notificaciones_push)
+        instance.save()
+        return instance

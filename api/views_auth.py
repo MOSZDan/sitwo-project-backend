@@ -400,3 +400,43 @@ def auth_user_settings_update(request):
             }, status=status.HTTP_200_OK)
 
     return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+
+from .serializers import NotificationPreferencesSerializer
+
+
+@api_view(["GET", "PATCH"])
+def notification_preferences(request):
+    """
+    GET: Obtiene las preferencias de notificación del usuario
+    PATCH: Actualiza las preferencias de notificación del usuario
+    """
+    if not request.user.is_authenticated:
+        return Response({"detail": "No autenticado"}, status=status.HTTP_401_UNAUTHORIZED)
+
+    try:
+        usuario_instance = Usuario.objects.get(correoelectronico=request.user.email)
+    except Usuario.DoesNotExist:
+        return Response({"detail": "Usuario no encontrado"}, status=status.HTTP_404_NOT_FOUND)
+
+    if request.method == "GET":
+        # Obtener preferencias actuales
+        data = {
+            "notificaciones_email": usuario_instance.notificaciones_email,
+            "notificaciones_push": usuario_instance.notificaciones_push,
+        }
+        return Response(data, status=status.HTTP_200_OK)
+
+    elif request.method == "PATCH":
+        # Actualizar preferencias
+        serializer = NotificationPreferencesSerializer(instance=usuario_instance, data=request.data, partial=True)
+        if serializer.is_valid():
+            serializer.save()
+            return Response({
+                "ok": True,
+                "message": "Preferencias de notificación actualizadas.",
+                "notificaciones_email": serializer.data['notificaciones_email'],
+                "notificaciones_push": serializer.data['notificaciones_push']
+            }, status=status.HTTP_200_OK)
+
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
