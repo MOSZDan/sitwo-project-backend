@@ -1,9 +1,10 @@
+# api/views.py
 from django.http import JsonResponse
 from django.contrib.auth import get_user_model
 from django.db import connection
 from django.core.mail import send_mail
 from django.conf import settings
-
+from rest_framework.viewsets import ModelViewSet
 from rest_framework.viewsets import ModelViewSet, ReadOnlyModelViewSet
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.filters import SearchFilter, OrderingFilter
@@ -64,11 +65,9 @@ class PacienteViewSet(ReadOnlyModelViewSet):
     serializer_class = PacienteSerializer
 
 
-# -------------------- Consultas (Citas) --------------------
-
-class ConsultaViewSet(ModelViewSet):
+class ConsultaViewSet(ModelViewSet):  # 👈 ¡CAMBIO IMPORTANTE!
     """
-    API para Consultas. Permite crear, leer, actualizar y eliminar.
+    API para Consultas. Ahora permite crear, leer, actualizar y eliminar.
     """
     permission_classes = [IsAuthenticated]
     queryset = (
@@ -103,8 +102,9 @@ class ConsultaViewSet(ModelViewSet):
         paciente = consulta.codpaciente
         usuario_paciente = paciente.codusuario
 
-        if getattr(usuario_paciente, "recibir_notificaciones", False):
+        if usuario_paciente.recibir_notificaciones:
             try:
+                # Asunto y mensaje del correo
                 subject = "Confirmación de tu cita en Clínica Dental"
                 message = (
                     f"Hola {usuario_paciente.nombre}, tu cita para el día "
@@ -113,13 +113,14 @@ class ConsultaViewSet(ModelViewSet):
                 )
                 from_email = settings.DEFAULT_FROM_EMAIL
                 recipient_list = [usuario_paciente.correoelectronico]
+
+                # Envía el correo
                 send_mail(subject, message, from_email, recipient_list, fail_silently=False)
+
             except Exception as e:
                 # Opcional: registrar el error si el correo no se pudo enviar
                 print(f"Error al enviar correo de notificación: {e}")
 
-
-# -------------------- Catálogos de soporte --------------------
 
 class OdontologoViewSet(ReadOnlyModelViewSet):
     """Devuelve una lista de odontólogos."""
@@ -170,49 +171,17 @@ class UsuarioViewSet(ModelViewSet):
     # Solo GET y PATCH (no creamos/ borramos usuarios desde aquí)
     http_method_names = ["get", "patch", "head", "options"]
 
-    # --- Helpers de autorización ---
-
-    def _es_admin_actual(self, dj_user) -> bool:
-        """
-        Considera admin si:
-        - Es staff en Django, o
-        - Su fila en 'usuario' (por email/username) tiene rol Administrador (id=1).
-        """
-        if getattr(dj_user, "is_staff", False):
-            return True
-
-        email = (getattr(dj_user, "email", None) or getattr(dj_user, "username", "")).strip().lower()
-        if not email:
-            return False
-
-        dom = Usuario.objects.filter(correoelectronico__iexact=email).only("idtipousuario_id").first()
-        return bool(dom and dom.idtipousuario_id == 1)  # 1 = Administrador (ajusta si tu ID difiere)
-
     def partial_update(self, request, *args, **kwargs):
         """
-        Autorización: solo administradores pueden cambiar roles.
-        Además, sincroniza is_staff en el auth_user del usuario modificado según su nuevo rol.
+        Chequeo inline: solo administradores pueden cambiar roles.
+        Admin = user.is_staff o usuario.idtipousuario_id == 1
         """
-        if not self._es_admin_actual(request.user):
+        user = request.user
+        is_staff = getattr(user, "is_staff", False)
+        dom = getattr(user, "usuario", None)
+        is_admin = getattr(dom, "idtipousuario_id", None) == 1  # 1 = Administrador
+
+        if not (is_staff or is_admin):
             return Response({"detail": "Solo administradores pueden cambiar roles."}, status=403)
 
-        # Ejecuta la actualización normal (cambia idtipousuario del Usuario de negocio)
-        resp = super().partial_update(request, *args, **kwargs)
-
-        # Sincroniza is_staff en el auth_user asociado al Usuario que acabas de modificar
-        try:
-            instance = self.get_object()  # Usuario (dominio) editado
-            User = get_user_model()
-            auth = (User.objects.filter(username__iexact=instance.correoelectronico).first()
-                    or User.objects.filter(email__iexact=instance.correoelectronico).first())
-            if auth:
-                new_staff = (instance.idtipousuario_id == 1)  # 1 = Administrador
-                if auth.is_staff != new_staff:
-                    auth.is_staff = new_staff
-                    auth.save(update_fields=["is_staff"])
-        except Exception as e:
-            # log opcional para diagnóstico
-            print("sync is_staff error:", e)
-
-        return resp
-
+        return super().partial_update(request, *args, **kwargs)
