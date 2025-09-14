@@ -7,7 +7,6 @@
 # Feel free to rename the models, but don't rename db_table values or field names.
 from django.db import models
 
-
 class Usuario(models.Model):
     codigo = models.AutoField(primary_key=True)
     nombre = models.CharField(max_length=255)
@@ -282,3 +281,34 @@ class Tipopago(models.Model):
     class Meta:
         #managed = False
         db_table = 'tipopago'
+
+class Vista(models.Model):
+    PLATAFORMA_WEB = "web"
+    PLATAFORMA_MOVIL = "mobile"
+    PLATAFORMA_CHOICES = (
+        (PLATAFORMA_WEB, "Web"),
+        (PLATAFORMA_MOVIL, "Móvil"),
+    )
+
+    # Código único para referenciar en FE o guardarlo como "slug"
+    codigo = models.CharField(max_length=80, unique=True)
+    nombre = models.CharField(max_length=120)
+    ruta = models.CharField(max_length=200, blank=True, default="")  # ej. /pacientes o /agenda
+    plataforma = models.CharField(max_length=10, choices=PLATAFORMA_CHOICES, default=PLATAFORMA_WEB)
+    descripcion = models.TextField(blank=True, default="")
+
+    # QUIÉNES PUEDEN VER ESTA VISTA (roles)
+    roles_permitidos = models.ManyToManyField(
+        Tipodeusuario,
+        related_name="vistas_permitidas",
+        blank=True,
+    )
+
+    class Meta:
+        db_table = "vista"
+        verbose_name = "Vista"
+        verbose_name_plural = "Vistas"
+        ordering = ("plataforma", "nombre")
+
+    def __str__(self):
+        return f"{self.get_plataforma_display()} | {self.nombre} ({self.codigo})"

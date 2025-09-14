@@ -3,8 +3,8 @@ from .models import (
     Usuario, Paciente, Odontologo, Recepcionista,
     Horario, Tipodeconsulta, Estadodeconsulta, Consulta,
     Tipodeusuario,   # ← roles
+    Vista,           # ← NUEVO: para gestión de permisos
 )
-
 
 # --------- Usuarios / Pacientes ---------
 
@@ -53,7 +53,7 @@ class RecepcionistaMiniSerializer(serializers.ModelSerializer):
 class HorarioSerializer(serializers.ModelSerializer):
     class Meta:
         model = Horario
-        fields = ("id","hora",)
+        fields = ("id", "hora",)
 
 
 class TipodeconsultaSerializer(serializers.ModelSerializer):
@@ -86,7 +86,6 @@ class CreateConsultaSerializer(serializers.ModelSerializer):
         )
 
 
-# --------- Consulta (se mantiene igual) ---------
 # --------- Consulta ---------
 
 class ConsultaSerializer(serializers.ModelSerializer):
@@ -106,7 +105,6 @@ class UpdateConsultaSerializer(serializers.ModelSerializer):
     """
     Serializador específico para actualizar solo el estado de una consulta.
     """
-
     class Meta:
         model = Consulta
         fields = ["idestadoconsulta"]
@@ -139,6 +137,7 @@ class UsuarioAdminSerializer(serializers.ModelSerializer):
             "idtipousuario",
             "rol",
         )
+    # 'codigo' viene de BD/negocio, lo dejamos de solo lectura si así lo manejan
         read_only_fields = ("codigo",)
 
     def update(self, instance, validated_data):
@@ -156,6 +155,7 @@ class UsuarioAdminSerializer(serializers.ModelSerializer):
                 )
         return super().update(instance, validated_data)
 
+
 class UserNotificationSettingsSerializer(serializers.ModelSerializer):
     """
     Serializer para actualizar únicamente las preferencias de notificación.
@@ -163,3 +163,24 @@ class UserNotificationSettingsSerializer(serializers.ModelSerializer):
     class Meta:
         model = Usuario
         fields = ['recibir_notificaciones']
+
+
+# --------- NUEVO: Vista (gestión de permisos por roles) ---------
+
+class VistaSerializer(serializers.ModelSerializer):
+    # trabajamos por ids de Tipodeusuario
+    roles_permitidos = serializers.PrimaryKeyRelatedField(
+        many=True, queryset=Tipodeusuario.objects.all(), required=False
+    )
+
+    class Meta:
+        model = Vista
+        fields = (
+            "id",
+            "codigo",
+            "nombre",
+            "ruta",
+            "plataforma",
+            "descripcion",
+            "roles_permitidos",
+        )
