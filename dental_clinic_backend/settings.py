@@ -92,6 +92,8 @@ INSTALLED_APPS = [
     "django.contrib.messages",
     "django.contrib.staticfiles",
     "rest_framework",
+    'django_filters',
+    "rest_framework.authtoken",  # <- AGREGADO para Token Authentication
     "api",
     "rest_framework.authtoken",
     # "rest_framework_simplejwt",
@@ -168,7 +170,7 @@ STATIC_ROOT = BASE_DIR / "staticfiles"
 STATICFILES_STORAGE = "whitenoise.storage.CompressedManifestStaticFilesStorage"
 
 # ------------------------------------
-# DRF
+# DRF - CORREGIDO
 # ------------------------------------
 REST_FRAMEWORK = {
     "DEFAULT_PERMISSION_CLASSES": ["rest_framework.permissions.IsAuthenticated"],
@@ -193,7 +195,7 @@ DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 # ------------------------------------
 # Frontend y Email (para recuperar contraseña)
 # ------------------------------------
-FRONTEND_URL = os.getenv("FRONTEND_URL", "http://localhost:5174")
+FRONTEND_URL = os.getenv("FRONTEND_URL", "https://sitwo-project.onrender.com")
 
 DEFAULT_FROM_EMAIL = os.getenv("DEFAULT_FROM_EMAIL", "no-reply@clinica.local")
 
