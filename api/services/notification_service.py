@@ -850,5 +850,5 @@ Puedes cambiar tus preferencias de notificación en: {settings.FRONTEND_URL}
         }
 
 
-# Instancia global del servicio
+# Instancia global del servicio..
 notification_service = NotificationService()
