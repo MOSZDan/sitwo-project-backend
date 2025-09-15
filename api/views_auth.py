@@ -10,6 +10,9 @@ from django.core.mail import EmailMultiAlternatives
 from django.core.exceptions import ObjectDoesNotExist, MultipleObjectsReturned
 from django.conf import settings
 from django.db import transaction, IntegrityError, DatabaseError
+from .serializers import UserNotificationSettingsSerializer
+from .models import Usuario, Paciente, Odontologo, Recepcionista, Bitacora
+from .serializers import UserNotificationSettingsSerializer
 
 from rest_framework import status
 from rest_framework.decorators import (
@@ -22,6 +25,7 @@ from rest_framework.response import Response
 from rest_framework.authtoken.models import Token
 from rest_framework.views import APIView
 
+from .serializers_auth import RegisterSerializer
 from .models import Usuario, Paciente, Odontologo, Recepcionista
 from .serializers import UserNotificationSettingsSerializer, UsuarioMeSerializer
 from .serializers_auth import RegisterSerializer
@@ -88,9 +92,11 @@ def auth_register(request):
             # Nombres (hasta 150 chars)
             update_fields = []
             if nombre:
-                dj_user.first_name = nombre[:150]; update_fields.append("first_name")
+                dj_user.first_name = nombre[:150];
+                update_fields.append("first_name")
             if apellido:
-                dj_user.last_name = apellido[:150]; update_fields.append("last_name")
+                dj_user.last_name = apellido[:150];
+                update_fields.append("last_name")
             if update_fields:
                 dj_user.save(update_fields=update_fields)
 
@@ -108,15 +114,20 @@ def auth_register(request):
             if not created:
                 changed = False
                 if usuario.idtipousuario_id != idtu:
-                    usuario.idtipousuario_id = idtu; changed = True
+                    usuario.idtipousuario_id = idtu;
+                    changed = True
                 if nombre and usuario.nombre != nombre:
-                    usuario.nombre = nombre; changed = True
+                    usuario.nombre = nombre;
+                    changed = True
                 if apellido and usuario.apellido != apellido:
-                    usuario.apellido = apellido; changed = True
+                    usuario.apellido = apellido;
+                    changed = True
                 if telefono is not None and usuario.telefono != telefono:
-                    usuario.telefono = telefono; changed = True
+                    usuario.telefono = telefono;
+                    changed = True
                 if sexo is not None and usuario.sexo != sexo:
-                    usuario.sexo = sexo; changed = True
+                    usuario.sexo = sexo;
+                    changed = True
                 if changed:
                     usuario.save()
 
@@ -190,6 +201,28 @@ def auth_login(request):
 
     try:
         usuario = Usuario.objects.get(correoelectronico=email)
+
+        # REGISTRAR LOGIN MANUAL AQUÍ (antes de que responda)
+        # Esto evita que el middleware lo detecte como anónimo
+        try:
+            from .middleware import get_client_ip
+
+            # Crear registro manual de login exitoso
+            Bitacora.objects.create(
+                accion='login',
+                descripcion=f'Login exitoso - {usuario.nombre} {usuario.apellido}',
+                usuario=usuario,
+                ip_address=get_client_ip(request),
+                user_agent=request.META.get('HTTP_USER_AGENT', ''),
+                datos_adicionales={
+                    'email': email,
+                    'metodo': 'manual_login_view'
+                }
+            )
+            print(f"Log manual creado para {usuario.nombre} {usuario.apellido}")
+        except Exception as log_error:
+            print(f"Error creando log manual: {log_error}")
+
         # Determinar subtipo
         subtipo = "usuario"
         if hasattr(usuario, "paciente"):
@@ -200,19 +233,10 @@ def auth_login(request):
             subtipo = "recepcionista"
         elif usuario.idtipousuario_id == 1:
             subtipo = "administrador"
-    except Usuario.DoesNotExist:
-        usuario = Usuario.objects.create(
-            correoelectronico=email,
-            nombre=user.first_name or email.split("@")[0],
-            apellido=user.last_name or "",
-            idtipousuario_id=2,  # paciente por defecto
-        )
-        subtipo = "paciente"
 
-    return Response(
-        {
+        return Response({
             "ok": True,
-            "message": "Inicio de sesión exitoso",
+            "message": "Login exitoso",
             "token": token.key,
             "user": {
                 "id": user.id,
@@ -229,10 +253,11 @@ def auth_login(request):
                 "sexo": usuario.sexo,
                 "subtipo": subtipo,
                 "idtipousuario": usuario.idtipousuario_id,
-            },
-        },
-        status=status.HTTP_200_OK,
-    )
+                "recibir_notificaciones": usuario.recibir_notificaciones,
+            }
+        })
+    except Usuario.DoesNotExist:
+        return Response({"detail": "Usuario no encontrado en el sistema"}, status=status.HTTP_404_NOT_FOUND)
 
 
 @api_view(["POST"])
@@ -329,10 +354,13 @@ def password_reset_request(request):
                 to=[user.email],
             )
             msg.attach_alternative(html_content, "text/html")
+            # Si el backend de correo no está configurado, evita tirar 500:
             msg.send(fail_silently=True)
         except Exception:
+            # No filtramos detalles; mantenemos respuesta genérica
             pass
 
+    # Respuesta uniforme (exista o no el email)
     return Response({"ok": True, "message": generic_msg}, status=status.HTTP_200_OK)
 
 
@@ -365,7 +393,6 @@ def password_reset_confirm(request):
     return Response({"ok": True, "message": "Contraseña actualizada correctamente"}, status=status.HTTP_200_OK)
 
 
-# ============================
 # Preferencias de Usuario
 # ============================
 @api_view(["PATCH"])
@@ -392,6 +419,46 @@ def auth_user_settings_update(request):
             }, status=status.HTTP_200_OK)
 
     return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+
+from .serializers import NotificationPreferencesSerializer
+
+
+@api_view(["GET", "PATCH"])
+def notification_preferences(request):
+    """
+    GET: Obtiene las preferencias de notificación del usuario
+    PATCH: Actualiza las preferencias de notificación del usuario
+    """
+    if not request.user.is_authenticated:
+        return Response({"detail": "No autenticado"}, status=status.HTTP_401_UNAUTHORIZED)
+
+    try:
+        usuario_instance = Usuario.objects.get(correoelectronico=request.user.email)
+    except Usuario.DoesNotExist:
+        return Response({"detail": "Usuario no encontrado"}, status=status.HTTP_404_NOT_FOUND)
+
+    if request.method == "GET":
+        # Obtener preferencias actuales
+        data = {
+            "notificaciones_email": usuario_instance.notificaciones_email,
+            "notificaciones_push": usuario_instance.notificaciones_push,
+        }
+        return Response(data, status=status.HTTP_200_OK)
+
+    elif request.method == "PATCH":
+        # Actualizar preferencias
+        serializer = NotificationPreferencesSerializer(instance=usuario_instance, data=request.data, partial=True)
+        if serializer.is_valid():
+            serializer.save()
+            return Response({
+                "ok": True,
+                "message": "Preferencias de notificación actualizadas.",
+                "notificaciones_email": serializer.data['notificaciones_email'],
+                "notificaciones_push": serializer.data['notificaciones_push']
+            }, status=status.HTTP_200_OK)
+
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
 
 # ============================

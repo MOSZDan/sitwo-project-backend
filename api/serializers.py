@@ -2,10 +2,9 @@ from rest_framework import serializers
 from .models import (
     Usuario, Paciente, Odontologo, Recepcionista,
     Horario, Tipodeconsulta, Estadodeconsulta, Consulta,
-    Tipodeusuario,  # ← roles
-    Vista,  # ← NUEVO: para gestión de permisos
+    Tipodeusuario,   # ← roles
+    Vista,           # ← NUEVO: para gestión de permisos
 )
-
 
 # --------- Usuarios / Pacientes ---------
 
@@ -106,7 +105,6 @@ class UpdateConsultaSerializer(serializers.ModelSerializer):
     """
     Serializador específico para actualizar solo el estado de una consulta.
     """
-
     class Meta:
         model = Consulta
         fields = ["idestadoconsulta"]
@@ -139,7 +137,7 @@ class UsuarioAdminSerializer(serializers.ModelSerializer):
             "idtipousuario",
             "rol",
         )
-        # 'codigo' viene de BD/negocio, lo dejamos de solo lectura si así lo manejan
+    # 'codigo' viene de BD/negocio, lo dejamos de solo lectura si así lo manejan
         read_only_fields = ("codigo",)
 
     def update(self, instance, validated_data):
@@ -162,7 +160,6 @@ class UserNotificationSettingsSerializer(serializers.ModelSerializer):
     """
     Serializer para actualizar únicamente las preferencias de notificación.
     """
-
     class Meta:
         model = Usuario
         fields = ['recibir_notificaciones']
@@ -280,3 +277,64 @@ class UsuarioMeSerializer(serializers.ModelSerializer):
             recepcionista_serializer.save()
 
         return instance
+#para notificaciones
+class NotificationPreferencesSerializer(serializers.ModelSerializer):
+    """
+    Serializer para gestionar las preferencias de notificaciones del usuario.
+    """
+
+    class Meta:
+        model = Usuario
+        fields = ['notificaciones_email', 'notificaciones_push']
+
+    def update(self, instance, validated_data):
+        instance.notificaciones_email = validated_data.get('notificaciones_email', instance.notificaciones_email)
+        instance.notificaciones_push = validated_data.get('notificaciones_push', instance.notificaciones_push)
+        instance.save()
+        return instance
+
+
+# api/serializers.py - Agregar al final del archivo existente
+
+from .models import Bitacora
+
+
+class BitacoraSerializer(serializers.ModelSerializer):
+    usuario_nombre = serializers.SerializerMethodField()
+    accion_display = serializers.CharField(source='get_accion_display', read_only=True)
+    fecha_hora_formatted = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Bitacora
+        fields = [
+            'id', 'accion', 'accion_display', 'descripcion',
+            'fecha_hora', 'fecha_hora_formatted', 'usuario', 'usuario_nombre',
+            'ip_address', 'user_agent', 'modelo_afectado', 'objeto_id',
+            'datos_adicionales'
+        ]
+        read_only_fields = ['id', 'fecha_hora']
+
+    def get_usuario_nombre(self, obj):
+        if obj.usuario:
+            return f"{obj.usuario.nombre} {obj.usuario.apellido}"
+        return "Usuario anónimo"
+
+    def get_fecha_hora_formatted(self, obj):
+        return obj.fecha_hora.strftime('%d/%m/%Y %H:%M:%S')
+
+
+# Función auxiliar para crear registros de bitácora manualmente
+def crear_registro_bitacora(accion, usuario=None, ip_address='127.0.0.1', descripcion='',
+                            modelo_afectado=None, objeto_id=None, datos_adicionales=None):
+    """
+    Función auxiliar para crear registros de bitácora desde las vistas
+    """
+    return Bitacora.objects.create(
+        accion=accion,
+        descripcion=descripcion,
+        usuario=usuario,
+        ip_address=ip_address,
+        modelo_afectado=modelo_afectado,
+        objeto_id=objeto_id,
+        datos_adicionales=datos_adicionales or {}
+    )
