@@ -200,3 +200,49 @@ class NotificationPreferencesSerializer(serializers.ModelSerializer):
         instance.notificaciones_push = validated_data.get('notificaciones_push', instance.notificaciones_push)
         instance.save()
         return instance
+
+
+# api/serializers.py - Agregar al final del archivo existente
+
+from .models import Bitacora
+
+
+class BitacoraSerializer(serializers.ModelSerializer):
+    usuario_nombre = serializers.SerializerMethodField()
+    accion_display = serializers.CharField(source='get_accion_display', read_only=True)
+    fecha_hora_formatted = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Bitacora
+        fields = [
+            'id', 'accion', 'accion_display', 'descripcion',
+            'fecha_hora', 'fecha_hora_formatted', 'usuario', 'usuario_nombre',
+            'ip_address', 'user_agent', 'modelo_afectado', 'objeto_id',
+            'datos_adicionales'
+        ]
+        read_only_fields = ['id', 'fecha_hora']
+
+    def get_usuario_nombre(self, obj):
+        if obj.usuario:
+            return f"{obj.usuario.nombre} {obj.usuario.apellido}"
+        return "Usuario anónimo"
+
+    def get_fecha_hora_formatted(self, obj):
+        return obj.fecha_hora.strftime('%d/%m/%Y %H:%M:%S')
+
+
+# Función auxiliar para crear registros de bitácora manualmente
+def crear_registro_bitacora(accion, usuario=None, ip_address='127.0.0.1', descripcion='',
+                            modelo_afectado=None, objeto_id=None, datos_adicionales=None):
+    """
+    Función auxiliar para crear registros de bitácora desde las vistas
+    """
+    return Bitacora.objects.create(
+        accion=accion,
+        descripcion=descripcion,
+        usuario=usuario,
+        ip_address=ip_address,
+        modelo_afectado=modelo_afectado,
+        objeto_id=objeto_id,
+        datos_adicionales=datos_adicionales or {}
+    )

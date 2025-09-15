@@ -10,7 +10,7 @@ from django.core.mail import EmailMultiAlternatives
 from django.conf import settings
 from django.db import transaction, IntegrityError, DatabaseError
 from .serializers import UserNotificationSettingsSerializer
-from .models import Usuario, Paciente, Odontologo, Recepcionista
+from .models import Usuario, Paciente, Odontologo, Recepcionista, Bitacora
 from .serializers import UserNotificationSettingsSerializer
 from rest_framework import status
 from rest_framework.decorators import (
@@ -174,8 +174,8 @@ def auth_register(request):
 # Login / Logout / User info
 # ============================
 @api_view(["POST"])
-@authentication_classes([])  # público
-@permission_classes([AllowAny])  # público
+@authentication_classes([])
+@permission_classes([AllowAny])
 def auth_login(request):
     """
     Inicio de sesión con email/password
@@ -196,6 +196,28 @@ def auth_login(request):
 
     try:
         usuario = Usuario.objects.get(correoelectronico=email)
+
+        # REGISTRAR LOGIN MANUAL AQUÍ (antes de que responda)
+        # Esto evita que el middleware lo detecte como anónimo
+        try:
+            from .middleware import get_client_ip
+
+            # Crear registro manual de login exitoso
+            Bitacora.objects.create(
+                accion='login',
+                descripcion=f'Login exitoso - {usuario.nombre} {usuario.apellido}',
+                usuario=usuario,
+                ip_address=get_client_ip(request),
+                user_agent=request.META.get('HTTP_USER_AGENT', ''),
+                datos_adicionales={
+                    'email': email,
+                    'metodo': 'manual_login_view'
+                }
+            )
+            print(f"Log manual creado para {usuario.nombre} {usuario.apellido}")
+        except Exception as log_error:
+            print(f"Error creando log manual: {log_error}")
+
         # Determinar subtipo
         subtipo = "usuario"
         if hasattr(usuario, "paciente"):
@@ -206,19 +228,10 @@ def auth_login(request):
             subtipo = "recepcionista"
         elif usuario.idtipousuario_id == 1:
             subtipo = "administrador"
-    except Usuario.DoesNotExist:
-        usuario = Usuario.objects.create(
-            correoelectronico=email,
-            nombre=user.first_name or email.split("@")[0],
-            apellido=user.last_name or "",
-            idtipousuario_id=2,  # paciente por defecto
-        )
-        subtipo = "paciente"
 
-    return Response(
-        {
+        return Response({
             "ok": True,
-            "message": "Inicio de sesión exitoso",
+            "message": "Login exitoso",
             "token": token.key,
             "user": {
                 "id": user.id,
@@ -235,10 +248,11 @@ def auth_login(request):
                 "sexo": usuario.sexo,
                 "subtipo": subtipo,
                 "idtipousuario": usuario.idtipousuario_id,
-            },
-        },
-        status=status.HTTP_200_OK,
-    )
+                "recibir_notificaciones": usuario.recibir_notificaciones,
+            }
+        })
+    except Usuario.DoesNotExist:
+        return Response({"detail": "Usuario no encontrado en el sistema"}, status=status.HTTP_404_NOT_FOUND)
 
 
 @api_view(["POST"])

@@ -313,3 +313,56 @@ class Vista(models.Model):
 
     def __str__(self):
         return f"{self.get_plataforma_display()} | {self.nombre} ({self.codigo})"
+
+
+# api/models.py - Agregar al final del archivo existente
+
+class Bitacora(models.Model):
+    ACCION_CHOICES = [
+        ('registro', 'Registro de usuario'),
+        ('login', 'Inicio de sesión'),
+        ('logout', 'Cierre de sesión'),
+        ('crear_cita', 'Crear cita'),
+        ('modificar_cita', 'Modificar cita'),
+        ('eliminar_cita', 'Eliminar cita'),
+        ('crear_paciente', 'Crear paciente'),
+        ('modificar_paciente', 'Modificar paciente'),
+        ('crear_usuario', 'Crear usuario'),
+        ('modificar_usuario', 'Modificar usuario'),
+        ('eliminar_usuario', 'Eliminar usuario'),
+        ('acceso_dashboard', 'Acceso al dashboard'),
+        ('otro', 'Otra acción'),
+    ]
+
+    # Información del evento
+    accion = models.CharField(max_length=50, choices=ACCION_CHOICES)
+    descripcion = models.TextField(blank=True, null=True)
+    fecha_hora = models.DateTimeField(auto_now_add=True)
+
+    # Usuario (puede ser null si es antes del login)
+    usuario = models.ForeignKey(
+        Usuario,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        db_column='codusuario'
+    )
+
+    # Información de la sesión/request
+    ip_address = models.GenericIPAddressField()
+    user_agent = models.TextField(blank=True, null=True)
+
+    # Información adicional del evento
+    modelo_afectado = models.CharField(max_length=100, blank=True, null=True)  # ej: 'Consulta', 'Usuario'
+    objeto_id = models.IntegerField(blank=True, null=True)  # ID del objeto afectado
+
+    # Datos extra en formato JSON
+    datos_adicionales = models.JSONField(blank=True, null=True)
+
+    class Meta:
+        db_table = 'bitacora'
+        ordering = ['-fecha_hora']
+
+    def __str__(self):
+        usuario_str = f"{self.usuario.nombre} {self.usuario.apellido}" if self.usuario else "Usuario anónimo"
+        return f"{self.get_accion_display()} - {usuario_str} - {self.fecha_hora.strftime('%d/%m/%Y %H:%M')}"

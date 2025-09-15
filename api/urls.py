@@ -13,7 +13,7 @@ router.register(r"tipos-consulta", views.TipodeconsultaViewSet, basename="tipos-
 router.register(r"tipos-usuario", views.TipodeusuarioViewSet, basename="tipos-usuario")
 router.register(r"usuarios", views.UsuarioViewSet, basename="usuarios")
 router.register(r"vistas", views.VistaViewSet, basename="vistas")
-
+router.register(r'bitacora', views.BitacoraViewSet, basename='bitacora')
 urlpatterns = [
     path("health/", views.health),
     path("db/", views.db_info),
