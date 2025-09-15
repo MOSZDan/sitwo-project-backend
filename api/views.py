@@ -1,14 +1,18 @@
 # api/views.py
-from django.http import JsonResponse
+from django.http import JsonResponse, HttpResponse
 from django.contrib.auth import get_user_model
 from django.db import connection
 from django.core.mail import send_mail
 from django.conf import settings
-from .models import Bitacora
-from .serializers import BitacoraSerializer
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_http_methods
+from django.db.models import Q
+from django.utils.timezone import make_aware
+from datetime import datetime, timedelta
+import csv
+from io import BytesIO
 
+from rest_framework import status
 from rest_framework.generics import RetrieveUpdateAPIView
 from rest_framework.viewsets import ModelViewSet, ReadOnlyModelViewSet
 from rest_framework.permissions import IsAuthenticated
@@ -16,12 +20,11 @@ from rest_framework.filters import SearchFilter, OrderingFilter
 from rest_framework.response import Response
 from rest_framework.decorators import action
 from django_filters.rest_framework import DjangoFilterBackend
-from .models import Usuario
-from .models import ( Paciente, Consulta, Odontologo, Horario, Tipodeconsulta,
-Usuario, Tipodeusuario, Vista )
-# Asegúrate de importar también los nuevos serializers que crearemos
-from .serializers import PacienteSerializer, ConsultaSerializer, CreateConsultaSerializer, OdontologoMiniSerializer, \
-    HorarioSerializer, TipodeconsultaSerializer
+
+from .models import (
+    Paciente, Consulta, Odontologo, Horario, Tipodeconsulta,
+    Usuario, Tipodeusuario, Vista, Bitacora
+)
 
 from .serializers import (
     PacienteSerializer,
@@ -31,10 +34,10 @@ from .serializers import (
     HorarioSerializer,
     TipodeconsultaSerializer,
     UpdateConsultaSerializer,
-    # Admin
     UsuarioAdminSerializer,
     TipodeusuarioSerializer,
-    VistaSerializer,  # ← NUEVO
+    VistaSerializer,
+    BitacoraSerializer
 )
 
 # -------------------- Health / Utils --------------------
@@ -43,14 +46,12 @@ def health(request):
     """Ping de salud"""
     return JsonResponse({"ok": True})
 
-
 def db_info(request):
     """Info rápida de la conexión a DB (útil en dev/diagnóstico)."""
     with connection.cursor() as cur:
         cur.execute("select current_database(), current_user")
         db, user = cur.fetchone()
     return JsonResponse({"database": db, "user": user})
-
 
 def users_count(request):
     """
@@ -59,7 +60,6 @@ def users_count(request):
     """
     User = get_user_model()
     return JsonResponse({"count": User.objects.count()})
-
 
 # Helper reutilizable: ¿el usuario actual es admin en la tabla de negocio?
 def _es_admin_por_tabla(dj_user) -> bool:
@@ -71,7 +71,6 @@ def _es_admin_por_tabla(dj_user) -> bool:
         idtipousuario_id=1  # 1 = Administrador
     ).exists()
 
-
 # -------------------- Pacientes --------------------
 
 class PacienteViewSet(ReadOnlyModelViewSet):
@@ -82,7 +81,6 @@ class PacienteViewSet(ReadOnlyModelViewSet):
     permission_classes = [IsAuthenticated]
     queryset = Paciente.objects.select_related("codusuario").all()
     serializer_class = PacienteSerializer
-
 
 # -------------------- Consultas (Citas) --------------------
 
@@ -111,9 +109,8 @@ class ConsultaViewSet(ModelViewSet):
             return UpdateConsultaSerializer
         return ConsultaSerializer
 
-def perform_create(self, serializer):
+    def perform_create(self, serializer):
         consulta = serializer.save()
-
         paciente = consulta.codpaciente
         usuario_paciente = paciente.codusuario
 
@@ -121,41 +118,32 @@ def perform_create(self, serializer):
         if getattr(usuario_paciente, "notificaciones_email", False):
             try:
                 subject = "Confirmación de tu cita en Clínica Dental"
-
-                # Formatear fecha en español
                 fecha_formateada = consulta.fecha.strftime('%d de %B de %Y')
                 hora_formateada = consulta.idhorario.hora.strftime('%H:%M')
 
-                # Mensaje más completo
                 message = f"""
-    Hola {usuario_paciente.nombre},
+Hola {usuario_paciente.nombre},
 
-    Tu cita ha sido agendada exitosamente con los siguientes detalles:
+Tu cita ha sido agendada exitosamente con los siguientes detalles:
 
-    📅 Fecha: {fecha_formateada}
-    🕐 Hora: {hora_formateada}
-    👨‍⚕️ Odontólogo: Dr. {consulta.cododontologo.codusuario.nombre} {consulta.cododontologo.codusuario.apellido}
-    🦷 Tipo de consulta: {consulta.idtipoconsulta.nombreconsulta}
+📅 Fecha: {fecha_formateada}
+🕐 Hora: {hora_formateada}
+👨‍⚕️ Odontólogo: Dr. {consulta.cododontologo.codusuario.nombre} {consulta.cododontologo.codusuario.apellido}
+🦷 Tipo de consulta: {consulta.idtipoconsulta.nombreconsulta}
 
-    Recuerda llegar 15 minutos antes de tu cita.
+Recuerda llegar 15 minutos antes de tu cita.
 
-    ¡Te esperamos en Smile Studio!
+¡Te esperamos en Smile Studio!
 
-    Si necesitas cancelar o reprogramar tu cita, ponte en contacto con nosotros.
+Si necesitas cancelar o reprogramar tu cita, ponte en contacto con nosotros.
                 """
 
                 from_email = settings.DEFAULT_FROM_EMAIL
                 recipient_list = [usuario_paciente.correoelectronico]
-
                 send_mail(subject, message, from_email, recipient_list, fail_silently=False)
 
             except Exception as e:
                 print(f"Error al enviar correo de notificación: {e}")
-
-        # Aquí se puede agregar lógica para notificaciones push en el futuro
-        # if getattr(usuario_paciente, "notificaciones_push", False):
-        #     send_push_notification(usuario_paciente, consulta)
-
 
 # -------------------- Catálogos --------------------
 
@@ -164,18 +152,15 @@ class OdontologoViewSet(ReadOnlyModelViewSet):
     queryset = Odontologo.objects.all()
     serializer_class = OdontologoMiniSerializer
 
-
 class HorarioViewSet(ReadOnlyModelViewSet):
     permission_classes = [IsAuthenticated]
     queryset = Horario.objects.all()
     serializer_class = HorarioSerializer
 
-
 class TipodeconsultaViewSet(ReadOnlyModelViewSet):
     permission_classes = [IsAuthenticated]
     queryset = Tipodeconsulta.objects.all()
     serializer_class = TipodeconsultaSerializer
-
 
 # -------------------- ADMIN: Roles y Usuarios --------------------
 
@@ -184,7 +169,6 @@ class TipodeusuarioViewSet(ReadOnlyModelViewSet):
     queryset = Tipodeusuario.objects.all().order_by("id")
     serializer_class = TipodeusuarioSerializer
     pagination_class = None
-
 
 class UsuarioViewSet(ModelViewSet):
     """
@@ -216,7 +200,6 @@ class UsuarioViewSet(ModelViewSet):
             return Response({"detail": "Solo administradores pueden cambiar roles."}, status=403)
 
         return super().partial_update(request, *args, **kwargs)
-
 
 # -------------------- NUEVO: Gestionar Permisos (Vistas) --------------------
 
@@ -258,41 +241,31 @@ class VistaViewSet(ModelViewSet):
         data = VistaSerializer(vistas, many=True).data
         return Response(data, status=200)
 
+# -------------------- Perfil de Usuario --------------------
 
 class UserProfileView(RetrieveUpdateAPIView):
     """
     Vista para leer y actualizar los datos del perfil del usuario autenticado.
     Soporta GET, PUT y PATCH.
     """
-    serializer_class = UsuarioMeSerializer
+    # Necesitarías agregar UsuarioMeSerializer en serializers.py
+    # serializer_class = UsuarioMeSerializer
     permission_classes = [IsAuthenticated]
 
     def get_object(self):
         """
-        ¡ESTA ES LA CORRECCIÓN!
         En lugar de devolver request.user directamente, buscamos el perfil 'Usuario'
         que está vinculado a ese usuario de autenticación.
         """
-        # self.request.user es el usuario de Django Auth.
-        # Buscamos en nuestro modelo 'Usuario' el que tenga el 'correoelectronico'
-        # que coincida con el email del usuario autenticado.
-        # Usamos .get() para obtener el objeto único.
         try:
-            # Asumimos que el email es el vínculo entre User y Usuario
             usuario_perfil = Usuario.objects.get(correoelectronico__iexact=self.request.user.email)
             return usuario_perfil
         except Usuario.DoesNotExist:
-            # Esto no debería pasar si cada User tiene un Usuario, pero es una buena práctica manejarlo
             return None
 
-# api/views.py - Agregar estas vistas al final del archivo existente
+# -------------------- Bitácora de Auditoría --------------------
 
-from .models import Bitacora
-from .serializers import BitacoraSerializer
-from django.db.models import Q
-from datetime import datetime, timedelta
-from django.utils.timezone import make_aware
-
+# Reemplaza solo la clase BitacoraViewSet en tu api/views.py
 
 class BitacoraViewSet(ReadOnlyModelViewSet):
     """
@@ -344,7 +317,7 @@ class BitacoraViewSet(ReadOnlyModelViewSet):
 
         return queryset
 
-    @action(detail=False, methods=['get'])
+    @action(detail=False, methods=['get'], url_path='estadisticas')
     def estadisticas(self, request):
         """
         Endpoint para obtener estadísticas de la bitácora
@@ -393,205 +366,173 @@ class BitacoraViewSet(ReadOnlyModelViewSet):
             'periodo': 'Últimos 30 días'
         })
 
+    @action(detail=False, methods=['get'], url_path='export')
+    def export(self, request):
+        """
+        Endpoint para exportar bitácora en CSV o PDF
+        """
+        if not _es_admin_por_tabla(request.user):
+            return Response(
+                {"detail": "No tienes permisos para exportar la bitácora."},
+                status=status.HTTP_403_FORBIDDEN
+            )
 
-# Función auxiliar para registrar eventos específicos desde las vistas
-def registrar_evento_bitacora(request, accion, descripcion='', modelo_afectado=None, objeto_id=None):
-    """
-    Función auxiliar para registrar eventos desde las vistas
-    """
-    try:
-        from .middleware import get_client_ip, get_usuario_from_request
+        format_type = request.query_params.get('format', 'csv').lower()
 
-        ip_address = get_client_ip(request)
-        usuario = get_usuario_from_request(request)
+        # Obtener datos con filtros aplicados
+        queryset = self.get_queryset()
 
-        Bitacora.objects.create(
-            accion=accion,
-            descripcion=descripcion,
-            usuario=usuario,
-            ip_address=ip_address,
-            user_agent=request.META.get('HTTP_USER_AGENT', ''),
-            modelo_afectado=modelo_afectado,
-            objeto_id=objeto_id,
-            datos_adicionales={
-                'path': request.path_info,
-                'method': request.method,
-            }
-        )
-    except Exception as e:
-        print(f"Error al registrar en bitácora: {e}")
+        # Aplicar filtros de la query
+        accion = request.query_params.get('accion', None)
+        if accion:
+            queryset = queryset.filter(accion=accion)
 
+        fecha_desde = request.query_params.get('fecha_desde', None)
+        fecha_hasta = request.query_params.get('fecha_hasta', None)
 
-# api/views.py - Agregar esta vista al BitacoraViewSet
+        if fecha_desde:
+            try:
+                fecha_desde = datetime.strptime(fecha_desde, '%Y-%m-%d')
+                fecha_desde = make_aware(fecha_desde)
+                queryset = queryset.filter(fecha_hora__gte=fecha_desde)
+            except ValueError:
+                pass
 
-@action(detail=False, methods=['get'])
-def export(self, request):
-    """
-    Endpoint para exportar bitácora en CSV o PDF
-    """
-    if not _es_admin_por_tabla(request.user):
-        return Response(
-            {"detail": "No tienes permisos para exportar la bitácora."},
-            status=status.HTTP_403_FORBIDDEN
-        )
+        if fecha_hasta:
+            try:
+                fecha_hasta = datetime.strptime(fecha_hasta, '%Y-%m-%d')
+                fecha_hasta = make_aware(fecha_hasta.replace(hour=23, minute=59, second=59))
+                queryset = queryset.filter(fecha_hora__lte=fecha_hasta)
+            except ValueError:
+                pass
 
-    format_type = request.query_params.get('format', 'csv').lower()
+        search = request.query_params.get('search', None)
+        if search:
+            queryset = queryset.filter(
+                Q(descripcion__icontains=search) |
+                Q(usuario__nombre__icontains=search) |
+                Q(usuario__apellido__icontains=search) |
+                Q(ip_address__icontains=search)
+            )
 
-    # Obtener datos con filtros aplicados
-    queryset = self.get_queryset()
+        if format_type == 'csv':
+            return self._export_csv(queryset)
+        elif format_type == 'pdf':
+            return self._export_pdf(queryset)
+        else:
+            return Response({"detail": "Formato no soportado"}, status=status.HTTP_400_BAD_REQUEST)
 
-    # Aplicar filtros de la query
-    accion = request.query_params.get('accion', None)
-    if accion:
-        queryset = queryset.filter(accion=accion)
+    def _export_csv(self, queryset):
+        """Exportar a CSV"""
+        response = HttpResponse(content_type='text/csv; charset=utf-8')
+        response['Content-Disposition'] = f'attachment; filename="bitacora_{datetime.now().strftime("%Y%m%d")}.csv"'
 
-    fecha_desde = request.query_params.get('fecha_desde', None)
-    fecha_hasta = request.query_params.get('fecha_hasta', None)
+        # Agregar BOM para Excel
+        response.write('\ufeff')
 
-    if fecha_desde:
-        try:
-            fecha_desde = datetime.strptime(fecha_desde, '%Y-%m-%d')
-            fecha_desde = make_aware(fecha_desde)
-            queryset = queryset.filter(fecha_hora__gte=fecha_desde)
-        except ValueError:
-            pass
+        writer = csv.writer(response)
 
-    if fecha_hasta:
-        try:
-            fecha_hasta = datetime.strptime(fecha_hasta, '%Y-%m-%d')
-            fecha_hasta = make_aware(fecha_hasta.replace(hour=23, minute=59, second=59))
-            queryset = queryset.filter(fecha_hora__lte=fecha_hasta)
-        except ValueError:
-            pass
-
-    search = request.query_params.get('search', None)
-    if search:
-        queryset = queryset.filter(
-            Q(descripcion__icontains=search) |
-            Q(usuario__nombre__icontains=search) |
-            Q(usuario__apellido__icontains=search) |
-            Q(ip_address__icontains=search)
-        )
-
-    if format_type == 'csv':
-        return self._export_csv(queryset)
-    elif format_type == 'pdf':
-        return self._export_pdf(queryset)
-    else:
-        return Response({"detail": "Formato no soportado"}, status=status.HTTP_400_BAD_REQUEST)
-
-
-def _export_csv(self, queryset):
-    """Exportar a CSV"""
-    import csv
-    from django.http import HttpResponse
-
-    response = HttpResponse(content_type='text/csv; charset=utf-8')
-    response['Content-Disposition'] = f'attachment; filename="bitacora_{datetime.now().strftime("%Y%m%d")}.csv"'
-
-    # Agregar BOM para Excel
-    response.write('\ufeff')
-
-    writer = csv.writer(response)
-
-    # Escribir headers
-    writer.writerow([
-        'Fecha/Hora',
-        'Acción',
-        'Usuario',
-        'Descripción',
-        'IP',
-        'Navegador',
-        'Modelo Afectado',
-        'Objeto ID'
-    ])
-
-    # Escribir datos
-    for entry in queryset[:1000]:  # Limitar a 1000 registros
-        usuario_nombre = f"{entry.usuario.nombre} {entry.usuario.apellido}" if entry.usuario else "Usuario anónimo"
-
+        # Escribir headers
         writer.writerow([
-            entry.fecha_hora.strftime('%d/%m/%Y %H:%M:%S'),
-            entry.get_accion_display(),
-            usuario_nombre,
-            entry.descripcion or '',
-            entry.ip_address,
-            entry.user_agent or '',
-            entry.modelo_afectado or '',
-            entry.objeto_id or ''
+            'Fecha/Hora',
+            'Acción',
+            'Usuario',
+            'Descripción',
+            'IP',
+            'Navegador',
+            'Modelo Afectado',
+            'Objeto ID'
         ])
 
-    return response
+        # Escribir datos
+        for entry in queryset[:1000]:  # Limitar a 1000 registros
+            usuario_nombre = f"{entry.usuario.nombre} {entry.usuario.apellido}" if entry.usuario else "Usuario anónimo"
 
+            writer.writerow([
+                entry.fecha_hora.strftime('%d/%m/%Y %H:%M:%S'),
+                entry.get_accion_display(),
+                usuario_nombre,
+                entry.descripcion or '',
+                entry.ip_address,
+                entry.user_agent or '',
+                entry.modelo_afectado or '',
+                entry.objeto_id or ''
+            ])
 
-def _export_pdf(self, queryset):
-    """Exportar a PDF"""
-    from django.http import HttpResponse
-    from reportlab.lib.pagesizes import letter, A4
-    from reportlab.lib import colors
-    from reportlab.lib.units import inch
-    from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
-    from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
-    from io import BytesIO
+        return response
 
-    buffer = BytesIO()
-    doc = SimpleDocTemplate(buffer, pagesize=A4)
-    elements = []
+    def _export_pdf(self, queryset):
+        """Exportar a PDF"""
+        try:
+            from reportlab.lib.pagesizes import A4
+            from reportlab.lib import colors
+            from reportlab.lib.units import inch
+            from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
+            from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+        except ImportError:
+            return Response(
+                {"detail": "PDF export no disponible. Instale reportlab: pip install reportlab"},
+                status=status.HTTP_400_BAD_REQUEST
+            )
 
-    styles = getSampleStyleSheet()
-    title_style = ParagraphStyle(
-        'CustomTitle',
-        parent=styles['Heading1'],
-        fontSize=16,
-        spaceAfter=30,
-        alignment=1  # Centrado
-    )
+        buffer = BytesIO()
+        doc = SimpleDocTemplate(buffer, pagesize=A4)
+        elements = []
 
-    # Título
-    title = Paragraph("Bitácora de Auditoría", title_style)
-    elements.append(title)
+        styles = getSampleStyleSheet()
+        title_style = ParagraphStyle(
+            'CustomTitle',
+            parent=styles['Heading1'],
+            fontSize=16,
+            spaceAfter=30,
+            alignment=1  # Centrado
+        )
 
-    # Fecha de generación
-    fecha_gen = Paragraph(f"Generado el: {datetime.now().strftime('%d/%m/%Y %H:%M')}", styles['Normal'])
-    elements.append(fecha_gen)
-    elements.append(Spacer(1, 20))
+        # Título
+        title = Paragraph("Bitácora de Auditoría", title_style)
+        elements.append(title)
 
-    # Datos de la tabla
-    data = [['Fecha/Hora', 'Acción', 'Usuario', 'Descripción', 'IP']]
+        # Fecha de generación
+        fecha_gen = Paragraph(f"Generado el: {datetime.now().strftime('%d/%m/%Y %H:%M')}", styles['Normal'])
+        elements.append(fecha_gen)
+        elements.append(Spacer(1, 20))
 
-    for entry in queryset[:100]:  # Limitar a 100 para PDF
-        usuario_nombre = f"{entry.usuario.nombre} {entry.usuario.apellido}" if entry.usuario else "Anónimo"
+        # Datos de la tabla
+        data = [['Fecha/Hora', 'Acción', 'Usuario', 'Descripción', 'IP']]
 
-        data.append([
-            entry.fecha_hora.strftime('%d/%m/%Y %H:%M'),
-            entry.get_accion_display(),
-            usuario_nombre,
-            (entry.descripcion or '')[:50] + '...' if len(entry.descripcion or '') > 50 else (entry.descripcion or ''),
-            entry.ip_address
-        ])
+        for entry in queryset[:100]:  # Limitar a 100 para PDF
+            usuario_nombre = f"{entry.usuario.nombre} {entry.usuario.apellido}" if entry.usuario else "Anónimo"
 
-    # Crear tabla
-    table = Table(data, colWidths=[1.2 * inch, 1 * inch, 1.2 * inch, 2 * inch, 1 * inch])
+            data.append([
+                entry.fecha_hora.strftime('%d/%m/%Y %H:%M'),
+                entry.get_accion_display(),
+                usuario_nombre,
+                (entry.descripcion or '')[:50] + '...' if len(entry.descripcion or '') > 50 else (entry.descripcion or ''),
+                entry.ip_address
+            ])
 
-    # Estilo de tabla
-    table.setStyle(TableStyle([
-        ('BACKGROUND', (0, 0), (-1, 0), colors.grey),
-        ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
-        ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
-        ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-        ('FONTSIZE', (0, 0), (-1, 0), 10),
-        ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
-        ('BACKGROUND', (0, 1), (-1, -1), colors.beige),
-        ('FONTNAME', (0, 1), (-1, -1), 'Helvetica'),
-        ('FONTSIZE', (0, 1), (-1, -1), 8),
-        ('GRID', (0, 0), (-1, -1), 1, colors.black)
-    ]))
+        # Crear tabla
+        table = Table(data, colWidths=[1.2 * inch, 1 * inch, 1.2 * inch, 2 * inch, 1 * inch])
 
-    elements.append(table)
-    doc.build(elements)
+        # Estilo de tabla
+        table.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, 0), colors.grey),
+            ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
+            ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
+            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+            ('FONTSIZE', (0, 0), (-1, 0), 10),
+            ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
+            ('BACKGROUND', (0, 1), (-1, -1), colors.beige),
+            ('FONTNAME', (0, 1), (-1, -1), 'Helvetica'),
+            ('FONTSIZE', (0, 1), (-1, -1), 8),
+            ('GRID', (0, 0), (-1, -1), 1, colors.black)
+        ]))
 
-    buffer.seek(0)
-    response = HttpResponse(buffer.read(), content_type='application/pdf')
-    response['Content-Disposition'] = f'attachment; filename="bitacora_{datetime.now().strftime("%Y%m%d")}.pdf"'
+        elements.append(table)
+        doc.build(elements)
 
-    return response
+        buffer.seek(0)
+        response = HttpResponse(buffer.read(), content_type='application/pdf')
+        response['Content-Disposition'] = f'attachment; filename="bitacora_{datetime.now().strftime("%Y%m%d")}.pdf"'
+
+        return response
