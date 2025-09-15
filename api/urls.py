@@ -2,14 +2,16 @@
 from django.urls import path, include
 from rest_framework.routers import DefaultRouter
 from . import views, views_auth
+from .views import UserProfileView
 
-# ← SOLO UNA DEFINICIÓN DEL ROUTER
 router = DefaultRouter()
 router.register(r"pacientes", views.PacienteViewSet, basename="pacientes")
 router.register(r"consultas", views.ConsultaViewSet, basename="consultas")
 router.register(r"odontologos", views.OdontologoViewSet, basename="odontologos")
 router.register(r"horarios", views.HorarioViewSet, basename="horarios")
 router.register(r"tipos-consulta", views.TipodeconsultaViewSet, basename="tipos-consulta")
+
+# 👇 SOLO AÑADIR ESTAS DOS RUTAS (admin)
 router.register(r"tipos-usuario", views.TipodeusuarioViewSet, basename="tipos-usuario")
 router.register(r"usuarios", views.UsuarioViewSet, basename="usuarios")
 router.register(r"vistas", views.VistaViewSet, basename="vistas")
@@ -26,14 +28,26 @@ urlpatterns = [
     path("auth/logout/", views_auth.auth_logout),
     path("auth/user/", views_auth.auth_user_info),
 
-    # Recuperación de contraseña
+    # 🔹 Perfil de usuario (legacy) - Lo dejamos por si otra parte lo usa
+    path("usuario/me", views_auth.UsuarioMeView.as_view(), name="usuario-me"),
+
+    # Reset de contraseña
     path("auth/password-reset/", views_auth.password_reset_request),
     path("auth/password-reset-confirm/", views_auth.password_reset_confirm),
 
-    # Preferencias de usuario
+    # Notificaciones y Preferencias
+    path("notificaciones/", include("api.urls_notifications")),
     path("auth/user/settings/", views_auth.auth_user_settings_update),
     path("auth/user/notifications/", views_auth.notification_preferences),
 
+
+    # --- CORRECCIÓN DEFINITIVA ---
+    # Eliminamos la ruta conflictiva y dejamos solo esta para el perfil.
+    # Ahora manejará GET (leer) y PATCH (actualizar) correctamente.
+    path('auth/user/', UserProfileView.as_view(), name='user-profile'),
+
+    # Rutas de los viewsets
+    path("", include(router.urls)),
     # Router al final
     path("", include(router.urls)),
 ]

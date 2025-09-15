@@ -185,6 +185,98 @@ class VistaSerializer(serializers.ModelSerializer):
             "roles_permitidos",
         )
 
+
+# --------- PERFIL (GET/PATCH de la propia fila en `usuario`) ---------
+class PacienteProfileSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Paciente
+        fields = ('direccion', 'fechanacimiento', 'carnetidentidad')
+
+
+class OdontologoProfileSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Odontologo
+        fields = ('especialidad', 'experienciaProfesional', 'noMatricula')
+
+
+class RecepcionistaProfileSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Recepcionista
+        fields = ('habilidadesSoftware',)
+
+
+# --- Serializer Principal para el Perfil del Usuario ---
+class UsuarioMeSerializer(serializers.ModelSerializer):
+    """
+    Gestiona la lectura y actualización del perfil del usuario autenticado,
+    incluyendo los campos específicos de su rol.
+    """
+    # Campo dinámico que mostrará el perfil correcto (paciente, odontologo, etc.)
+    perfil = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Usuario
+        # Campos comunes que siempre se mostrarán
+        fields = (
+            'codigo', 'nombre', 'apellido', 'telefono',
+            'correoelectronico', 'sexo', 'perfil'
+        )
+        read_only_fields = ('codigo', 'correoelectronico', 'perfil')
+
+    def get_perfil(self, instance):
+        """
+        Esta función se ejecuta al LEER (GET) los datos.
+        Devuelve un diccionario con los datos del perfil específico del usuario.
+        """
+        # El 'idtipousuario_id' viene de tu modelo Usuario y nos dice el rol.
+        role_id = instance.idtipousuario_id
+
+        if role_id == 2 and hasattr(instance, 'paciente'):  # 2 = Paciente
+            return PacienteProfileSerializer(instance.paciente).data
+        elif role_id == 4 and hasattr(instance, 'odontologo'):  # 4 = Odontologo
+            return OdontologoProfileSerializer(instance.odontologo).data
+        elif role_id == 3 and hasattr(instance, 'recepcionista'):  # 3 = Recepcionista
+            return RecepcionistaProfileSerializer(instance.recepcionista).data
+
+        return None  # Si no tiene un perfil específico
+
+    def update(self, instance, validated_data):
+        """
+        Esta función se ejecuta al GUARDAR (PATCH/PUT) los datos.
+        """
+        # 1. Actualiza los campos comunes del modelo Usuario
+        instance.nombre = validated_data.get('nombre', instance.nombre)
+        instance.apellido = validated_data.get('apellido', instance.apellido)
+        instance.telefono = validated_data.get('telefono', instance.telefono)
+        instance.save()
+
+        # 2. Revisa los datos que llegaron en la petición (`self.context['request'].data`)
+        #    y actualiza el perfil correspondiente.
+        request_data = self.context['request'].data
+        role_id = instance.idtipousuario_id
+
+        if role_id == 2 and hasattr(instance, 'paciente'):
+            paciente_serializer = PacienteProfileSerializer(
+                instance.paciente, data=request_data, partial=True
+            )
+            paciente_serializer.is_valid(raise_exception=True)
+            paciente_serializer.save()
+
+        elif role_id == 4 and hasattr(instance, 'odontologo'):
+            odontologo_serializer = OdontologoProfileSerializer(
+                instance.odontologo, data=request_data, partial=True
+            )
+            odontologo_serializer.is_valid(raise_exception=True)
+            odontologo_serializer.save()
+
+        elif role_id == 3 and hasattr(instance, 'recepcionista'):
+            recepcionista_serializer = RecepcionistaProfileSerializer(
+                instance.recepcionista, data=request_data, partial=True
+            )
+            recepcionista_serializer.is_valid(raise_exception=True)
+            recepcionista_serializer.save()
+
+        return instance
 #para notificaciones
 class NotificationPreferencesSerializer(serializers.ModelSerializer):
     """

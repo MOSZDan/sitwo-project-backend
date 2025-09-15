@@ -93,6 +93,8 @@ INSTALLED_APPS = [
     'django_filters',
     "rest_framework.authtoken",
     "api",
+    #"rest_framework.authtoken",
+    # "rest_framework_simplejwt",
 ]
 
 # ------------------------------------
@@ -167,7 +169,7 @@ STATIC_ROOT = BASE_DIR / "staticfiles"
 STATICFILES_STORAGE = "whitenoise.storage.CompressedManifestStaticFilesStorage"
 
 # ------------------------------------
-# DRF
+# DRF - CORREGIDO
 # ------------------------------------
 REST_FRAMEWORK = {
     "DEFAULT_PERMISSION_CLASSES": ["rest_framework.permissions.IsAuthenticated"],
@@ -177,6 +179,11 @@ REST_FRAMEWORK = {
     ],
     "DEFAULT_PAGINATION_CLASS": "rest_framework.pagination.PageNumberPagination",
     "PAGE_SIZE": 25,
+    'DEFAULT_THROTTLE_RATES': {
+        'notifications': '100/hour',
+        'device_registration': '10/day',
+        'preference_updates': '50/hour',
+    }
 }
 
 # ------------------------------------
@@ -185,7 +192,7 @@ REST_FRAMEWORK = {
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
 # ------------------------------------
-# Frontend y Email
+# Frontend y Email (para recuperar contraseña)
 # ------------------------------------
 FRONTEND_URL = os.getenv("FRONTEND_URL", "https://sitwo-project.onrender.com")
 DEFAULT_FROM_EMAIL = os.getenv("DEFAULT_FROM_EMAIL", "no-reply@clinica.local")
@@ -198,18 +205,62 @@ EMAIL_HOST_PASSWORD = os.getenv("EMAIL_HOST_PASSWORD", "")
 EMAIL_USE_TLS = os.getenv("EMAIL_USE_TLS", "True") == "True"
 EMAIL_USE_SSL = os.getenv("EMAIL_USE_SSL", "False") == "True"
 
-# Logging detallado
+
+# ------------------------------------
+# 🆕 CONFIGURACIÓN DE NOTIFICACIONES
+# ------------------------------------
+
+# Push Notifications usando Supabase Edge Functions (alternativa a Firebase)
+ONESIGNAL_APP_ID = os.getenv("ONESIGNAL_APP_ID", "")
+ONESIGNAL_REST_API_KEY = os.getenv("ONESIGNAL_REST_API_KEY", "")
+
+# Configuración de notificaciones por email
+DEFAULT_REMINDER_HOURS = int(os.getenv("DEFAULT_REMINDER_HOURS", "24"))
+MAX_NOTIFICATION_RETRIES = int(os.getenv("MAX_NOTIFICATION_RETRIES", "3"))
+NOTIFICATION_RETRY_DELAY = int(os.getenv("NOTIFICATION_RETRY_DELAY", "30"))
+
+# Información de la clínica para emails
+CLINIC_INFO = {
+    'name': os.getenv("CLINIC_NAME", "Clínica Dental"),
+    'address': os.getenv("CLINIC_ADDRESS", "Santa Cruz, Bolivia"),
+    'phone': os.getenv("CLINIC_PHONE", "+591 XXXXXXXX"),
+    'email': os.getenv("CLINIC_EMAIL", "info@clinica.com"),
+    'website': FRONTEND_URL,
+}
+
+# Configuración de logging para notificaciones
+import os
+logs_dir = os.path.join(BASE_DIR, 'logs')
+if not os.path.exists(logs_dir):
+    os.makedirs(logs_dir)
+
+# Throttling para APIs de notificaciones
+REST_FRAMEWORK.update({
+    'DEFAULT_THROTTLE_RATES': {
+        'notifications': '100/hour',
+        'device_registration': '10/day',
+        'preference_updates': '50/hour',
+    }
+})
+# Al final de settings.py
 LOGGING = {
     'version': 1,
     'disable_existing_loggers': False,
+    'formatters': {
+        'verbose': {
+            'format': '{levelname} {asctime} {module} {process:d} {thread:d} {message}',
+            'style': '{',
+        },
+    },
     'handlers': {
         'console': {
             'class': 'logging.StreamHandler',
+            'formatter': 'verbose',
         },
     },
     'root': {
         'handlers': ['console'],
-        'level': 'DEBUG',
+        'level': 'INFO',
     },
     'loggers': {
         'django': {

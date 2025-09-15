@@ -7,23 +7,28 @@ from django.contrib.auth.tokens import default_token_generator
 from django.utils.encoding import force_bytes, force_str
 from django.utils.http import urlsafe_base64_encode, urlsafe_base64_decode
 from django.core.mail import EmailMultiAlternatives
+from django.core.exceptions import ObjectDoesNotExist, MultipleObjectsReturned
 from django.conf import settings
 from django.db import transaction, IntegrityError, DatabaseError
 from .serializers import UserNotificationSettingsSerializer
 from .models import Usuario, Paciente, Odontologo, Recepcionista, Bitacora
 from .serializers import UserNotificationSettingsSerializer
+
 from rest_framework import status
 from rest_framework.decorators import (
     api_view,
     permission_classes,
     authentication_classes,
 )
-from rest_framework.permissions import AllowAny
+from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.authtoken.models import Token
+from rest_framework.views import APIView
 
 from .serializers_auth import RegisterSerializer
 from .models import Usuario, Paciente, Odontologo, Recepcionista
+from .serializers import UserNotificationSettingsSerializer, UsuarioMeSerializer
+from .serializers_auth import RegisterSerializer
 
 User = get_user_model()
 
@@ -174,8 +179,8 @@ def auth_register(request):
 # Login / Logout / User info
 # ============================
 @api_view(["POST"])
-@authentication_classes([])
-@permission_classes([AllowAny])
+@authentication_classes([])  # público
+@permission_classes([AllowAny])  # público
 def auth_login(request):
     """
     Inicio de sesión con email/password
@@ -454,3 +459,88 @@ def notification_preferences(request):
             }, status=status.HTTP_200_OK)
 
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+
+# ============================
+# Perfil de Usuario (GET/PATCH)
+# ============================
+class UsuarioMeView(APIView):
+    """
+    GET   /api/usuario/me  -> devuelve la fila en `usuario` del usuario autenticado
+    PATCH /api/usuario/me  -> actualiza campos permitidos; sincroniza auth_user.email si cambia `correoelectronico`
+    Vincula por: auth_user.email == usuario.correoelectronico (case-insensitive)
+    """
+    permission_classes = [IsAuthenticated]
+
+    def _resolve_email(self, request) -> str:
+        email = (getattr(request.user, "email", "") or "").strip()
+        if not email:
+            username = (getattr(request.user, "username", "") or "").strip()
+            if "@" in username:
+                email = username
+        return email
+
+    def _get_row(self, request) -> Usuario:
+        email = self._resolve_email(request)
+        if not email:
+            raise ObjectDoesNotExist("El usuario autenticado no tiene email.")
+        try:
+            return Usuario.objects.get(correoelectronico__iexact=email)
+        except MultipleObjectsReturned:
+            return Usuario.objects.filter(correoelectronico__iexact=email).order_by("codigo").first()
+
+    def _serialize(self, u: Usuario) -> dict:
+        return {
+            "codigo": u.codigo,
+            "nombre": u.nombre,
+            "apellido": u.apellido,
+            "correoelectronico": u.correoelectronico,
+            "sexo": u.sexo,
+            "telefono": u.telefono,
+            "idtipousuario": u.idtipousuario_id,
+            "recibir_notificaciones": u.recibir_notificaciones,
+        }
+
+    def get(self, request):
+        try:
+            u = self._get_row(request)
+        except ObjectDoesNotExist:
+            return Response({"detail": "No se encontró tu fila en 'usuario' (correo no coincide)."}, status=404)
+        return Response(self._serialize(u))
+
+    @transaction.atomic
+    def patch(self, request):
+        try:
+            u = self._get_row(request)
+        except ObjectDoesNotExist:
+            return Response({"detail": "No se encontró tu fila en 'usuario' (correo no coincide)."}, status=404)
+
+        ser = UsuarioMeSerializer(data=request.data, partial=True)
+        ser.is_valid(raise_exception=True)
+        data = ser.validated_data
+
+        allowed = {"nombre", "apellido", "correoelectronico", "sexo", "telefono", "recibir_notificaciones"}
+
+        # Evitar duplicar correos (la BD también lo asegura con unique=True)
+        nuevo_correo = data.get("correoelectronico")
+        if nuevo_correo and Usuario.objects.exclude(pk=u.pk).filter(correoelectronico__iexact=nuevo_correo).exists():
+            return Response({"detail": "Ese correo ya está registrado."}, status=status.HTTP_400_BAD_REQUEST)
+
+        # Asignar cambios permitidos
+        for k, v in data.items():
+            if k in allowed:
+                setattr(u, k, v)
+        u.save()
+
+        # Si cambió correo, sincronizar auth_user
+        if nuevo_correo:
+            auth_user = User.objects.get(pk=request.user.pk)
+            auth_user.email = nuevo_correo
+            try:
+                if getattr(auth_user, "username", None) and "@" in (auth_user.username or ""):
+                    auth_user.username = nuevo_correo
+                auth_user.save(update_fields=["email", "username"])
+            except Exception:
+                auth_user.save(update_fields=["email"])
+
+        return Response(self._serialize(u), status=200)
