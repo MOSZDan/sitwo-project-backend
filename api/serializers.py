@@ -5,7 +5,7 @@ from .models import (
     Tipodeusuario,   # ← roles
     Vista,           # ← NUEVO: para gestión de permisos
 )
-
+from rest_framework.validators import UniqueTogetherValidator
 # --------- Usuarios / Pacientes ---------
 
 class UsuarioMiniSerializer(serializers.ModelSerializer):
@@ -73,7 +73,6 @@ class EstadodeconsultaSerializer(serializers.ModelSerializer):
 class CreateConsultaSerializer(serializers.ModelSerializer):
     class Meta:
         model = Consulta
-        # Campos que el frontend enviará para crear una cita
         fields = (
             "fecha",
             "codpaciente",
@@ -81,11 +80,57 @@ class CreateConsultaSerializer(serializers.ModelSerializer):
             "idhorario",
             "idtipoconsulta",
             "idestadoconsulta",
-            # opcional
             "codrecepcionista",
         )
 
+    def validate(self, data):
+        """
+        Validar que no exista ya una consulta para el mismo odontólogo,
+        en la misma fecha y horario.
+        """
+        if Consulta.objects.filter(
+            cododontologo=data['cododontologo'],
+            fecha=data['fecha'],
+            idhorario=data['idhorario']
+            # Opcional: Excluir citas canceladas si se permite re-agendar sobre ellas
+            # ).exclude(idestadoconsulta__in=[3, 4]
+        ).exists():
+            raise serializers.ValidationError(
+                "Este horario ya está reservado con el odontólogo seleccionado."
+            )
+        return data
 
+
+# --- NUEVO: Serializador para Reprogramar Cita ---
+class ReprogramarConsultaSerializer(serializers.Serializer):
+    """
+    Serializador para validar los datos al reprogramar una cita.
+    """
+    fecha = serializers.DateField()
+    idhorario = serializers.PrimaryKeyRelatedField(queryset=Horario.objects.all())
+
+    def validate(self, data):
+        """
+        Valida que el nuevo horario para reprogramar esté disponible.
+        El 'cododontologo' se inyecta desde la vista.
+        """
+        consulta = self.context.get('consulta')
+        if not consulta:
+            # Este error no debería ocurrir si se usa correctamente desde la vista
+            raise serializers.ValidationError("No se encontró la consulta a reprogramar.")
+
+        cododontologo = consulta.cododontologo
+
+        # Validar que el nuevo horario no esté ya ocupado por otra cita
+        if Consulta.objects.filter(
+            cododontologo=cododontologo,
+            fecha=data['fecha'],
+            idhorario=data['idhorario']
+        ).exclude(pk=consulta.pk).exists(): # Excluimos la cita actual
+            raise serializers.ValidationError(
+                "El nuevo horario seleccionado no está disponible."
+            )
+        return data
 # --------- Consulta ---------
 
 class ConsultaSerializer(serializers.ModelSerializer):

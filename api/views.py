@@ -37,14 +37,17 @@ from .serializers import (
     UsuarioAdminSerializer,
     TipodeusuarioSerializer,
     VistaSerializer,
-    BitacoraSerializer
+    BitacoraSerializer,
+    ReprogramarConsultaSerializer
 )
+
 
 # -------------------- Health / Utils --------------------
 
 def health(request):
     """Ping de salud"""
     return JsonResponse({"ok": True})
+
 
 def db_info(request):
     """Info rápida de la conexión a DB (útil en dev/diagnóstico)."""
@@ -53,6 +56,7 @@ def db_info(request):
         db, user = cur.fetchone()
     return JsonResponse({"database": db, "user": user})
 
+
 def users_count(request):
     """
     Cuenta de usuarios del auth de Django (tabla auth_user).
@@ -60,6 +64,7 @@ def users_count(request):
     """
     User = get_user_model()
     return JsonResponse({"count": User.objects.count()})
+
 
 # Helper reutilizable: ¿el usuario actual es admin en la tabla de negocio?
 def _es_admin_por_tabla(dj_user) -> bool:
@@ -71,6 +76,7 @@ def _es_admin_por_tabla(dj_user) -> bool:
         idtipousuario_id=1  # 1 = Administrador
     ).exists()
 
+
 # -------------------- Pacientes --------------------
 
 class PacienteViewSet(ReadOnlyModelViewSet):
@@ -81,6 +87,7 @@ class PacienteViewSet(ReadOnlyModelViewSet):
     permission_classes = [IsAuthenticated]
     queryset = Paciente.objects.select_related("codusuario").all()
     serializer_class = PacienteSerializer
+
 
 # -------------------- Consultas (Citas) --------------------
 
@@ -103,11 +110,16 @@ class ConsultaViewSet(ModelViewSet):
     filterset_fields = ['codpaciente', 'fecha']
 
     def get_serializer_class(self):
+        # --- MODIFICACIÓN: Añadir el nuevo serializador ---
+        if self.action == 'reprogramar':
+            return ReprogramarConsultaSerializer
         if self.action in ["create", "update"]:
             return CreateConsultaSerializer
         if self.action == "partial_update":
             return UpdateConsultaSerializer
         return ConsultaSerializer
+
+    # El método perform_create se mantiene igual para enviar correos
 
     def perform_create(self, serializer):
         consulta = serializer.save()
@@ -145,6 +157,56 @@ Si necesitas cancelar o reprogramar tu cita, ponte en contacto con nosotros.
             except Exception as e:
                 print(f"Error al enviar correo de notificación: {e}")
 
+
+    @action(detail=True, methods=['patch'], url_path='reprogramar')
+    def reprogramar(self, request, pk=None):
+        """
+        Reprograma una cita a una nueva fecha y/o horario.
+        Valida que el nuevo horario esté libre.
+        """
+        consulta = self.get_object()
+
+        # Pasamos la instancia de la consulta al contexto del serializador para la validación
+        serializer = self.get_serializer(data=request.data, context={'consulta': consulta})
+        serializer.is_valid(raise_exception=True)
+
+        nueva_fecha = serializer.validated_data['fecha']
+        nuevo_horario = serializer.validated_data['idhorario']
+
+        # Actualizar la consulta
+        consulta.fecha = nueva_fecha
+        consulta.idhorario = nuevo_horario
+
+        # Opcional: Cambiar estado a 'Reprogramada' si existe (ej. id=5)
+        # consulta.idestadoconsulta_id = 5
+        consulta.save()
+
+        # TODO: Considera enviar una notificación de reprogramación por email
+
+        return Response(
+            {"detail": "La cita ha sido reprogramada exitosamente."},
+            status=status.HTTP_200_OK
+        )
+
+
+    # --- NUEVA ACCIÓN: Cancelar Cita (eliminar definitivamente) ---
+    @action(detail=True, methods=['post'], url_path='cancelar')
+    def cancelar(self, request, pk=None):
+        """
+        Cancela una cita eliminándola de la base de datos.
+        """
+        consulta = self.get_object()
+
+        consulta_id = consulta.pk
+        consulta.delete()
+
+        # Opcional: enviar notificación de cancelación aquí
+
+        return Response(
+            {"detail": "La cita ha sido cancelada y eliminada.", "id": consulta_id},
+            status=status.HTTP_200_OK
+        )
+
 # -------------------- Catálogos --------------------
 
 class OdontologoViewSet(ReadOnlyModelViewSet):
@@ -152,15 +214,18 @@ class OdontologoViewSet(ReadOnlyModelViewSet):
     queryset = Odontologo.objects.all()
     serializer_class = OdontologoMiniSerializer
 
+
 class HorarioViewSet(ReadOnlyModelViewSet):
     permission_classes = [IsAuthenticated]
     queryset = Horario.objects.all()
     serializer_class = HorarioSerializer
 
+
 class TipodeconsultaViewSet(ReadOnlyModelViewSet):
     permission_classes = [IsAuthenticated]
     queryset = Tipodeconsulta.objects.all()
     serializer_class = TipodeconsultaSerializer
+
 
 # -------------------- ADMIN: Roles y Usuarios --------------------
 
@@ -170,12 +235,8 @@ class TipodeusuarioViewSet(ReadOnlyModelViewSet):
     serializer_class = TipodeusuarioSerializer
     pagination_class = None
 
+
 class UsuarioViewSet(ModelViewSet):
-    """
-    Lista/búsqueda de usuarios y permite cambiar el rol (idtipousuario) vía PATCH.
-    Cualquier usuario que sea Administrador en la tabla (idtipousuario_id == 1)
-    puede cambiar roles (no depende de is_staff).
-    """
     permission_classes = [IsAuthenticated]
     queryset = Usuario.objects.select_related("idtipousuario").all()
     serializer_class = UsuarioAdminSerializer
@@ -201,15 +262,10 @@ class UsuarioViewSet(ModelViewSet):
 
         return super().partial_update(request, *args, **kwargs)
 
+
 # -------------------- NUEVO: Gestionar Permisos (Vistas) --------------------
 
 class VistaViewSet(ModelViewSet):
-    """
-    Administra las vistas (páginas) y los roles que pueden acceder.
-    - GET list/retrieve: autenticado
-    - POST/PATCH/DELETE: solo administradores (tabla o is_staff)
-    - mis-vistas: vistas permitidas al usuario logueado (por su rol)
-    """
     permission_classes = [IsAuthenticated]
     queryset = Vista.objects.prefetch_related("roles_permitidos").all()
     serializer_class = VistaSerializer
@@ -241,6 +297,7 @@ class VistaViewSet(ModelViewSet):
         data = VistaSerializer(vistas, many=True).data
         return Response(data, status=200)
 
+
 # -------------------- Perfil de Usuario --------------------
 
 class UserProfileView(RetrieveUpdateAPIView):
@@ -262,6 +319,7 @@ class UserProfileView(RetrieveUpdateAPIView):
             return usuario_perfil
         except Usuario.DoesNotExist:
             return None
+
 
 # -------------------- Bitácora de Auditoría --------------------
 
@@ -507,7 +565,8 @@ class BitacoraViewSet(ReadOnlyModelViewSet):
                 entry.fecha_hora.strftime('%d/%m/%Y %H:%M'),
                 entry.get_accion_display(),
                 usuario_nombre,
-                (entry.descripcion or '')[:50] + '...' if len(entry.descripcion or '') > 50 else (entry.descripcion or ''),
+                (entry.descripcion or '')[:50] + '...' if len(entry.descripcion or '') > 50 else (
+                        entry.descripcion or ''),
                 entry.ip_address
             ])
 
