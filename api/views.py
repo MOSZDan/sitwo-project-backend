@@ -83,7 +83,7 @@ def _es_admin_por_tabla(dj_user) -> bool:
 
 # -------------------- Pacientes --------------------
 
-class PacienteViewSet(ReadOnlyModelViewSet):
+#class PacienteViewSet(ReadOnlyModelViewSet):
     """
     API read-only de Pacientes.
     Requiere sesión activa (IsAuthenticated) y trae el Usuario relacionado.
@@ -91,7 +91,19 @@ class PacienteViewSet(ReadOnlyModelViewSet):
     permission_classes = [IsAuthenticated]
     queryset = Paciente.objects.select_related("codusuario").all()
     serializer_class = PacienteSerializer
-
+class PacienteViewSet(ReadOnlyModelViewSet):
+    """
+    API read-only de Pacientes.
+    Solo devuelve pacientes cuyo usuario tiene rol id=2.
+    """
+    permission_classes = [IsAuthenticated]
+    queryset = (
+        Paciente.objects
+        .select_related("codusuario")
+        .filter(codusuario__idtipousuario_id=2)   # 👈 filtro por rol paciente
+        .all()
+    )
+    serializer_class = PacienteSerializer
 
 # -------------------- Consultas (Citas) --------------------
 
