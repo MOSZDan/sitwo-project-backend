@@ -4,8 +4,10 @@ from .models import (
     Horario, Tipodeconsulta, Estadodeconsulta, Consulta,
     Tipodeusuario,   # ← roles
     Vista,           # ← NUEVO: para gestión de permisos
+    Historialclinico,  # ← NUEVO: HCE
 )
 from rest_framework.validators import UniqueTogetherValidator
+
 # --------- Usuarios / Pacientes ---------
 
 class UsuarioMiniSerializer(serializers.ModelSerializer):
@@ -131,6 +133,7 @@ class ReprogramarConsultaSerializer(serializers.Serializer):
                 "El nuevo horario seleccionado no está disponible."
             )
         return data
+
 # --------- Consulta ---------
 
 class ConsultaSerializer(serializers.ModelSerializer):
@@ -322,6 +325,7 @@ class UsuarioMeSerializer(serializers.ModelSerializer):
             recepcionista_serializer.save()
 
         return instance
+
 #para notificaciones
 class NotificationPreferencesSerializer(serializers.ModelSerializer):
     """
@@ -337,6 +341,75 @@ class NotificationPreferencesSerializer(serializers.ModelSerializer):
         instance.notificaciones_push = validated_data.get('notificaciones_push', instance.notificaciones_push)
         instance.save()
         return instance
+
+
+# =========================
+#   NUEVO: Historias Clínicas (HCE)
+# =========================
+from django.utils import timezone
+from django.db.models import Max
+
+class HistorialclinicoCreateSerializer(serializers.ModelSerializer):
+    """
+    Crea una HCE (episodio) para un paciente.
+    Regla anti-duplicado: mismo día + mismo motivo -> requiere forzar_nuevo_episodio=true
+    """
+    pacientecodigo = serializers.PrimaryKeyRelatedField(queryset=Paciente.objects.all())
+    forzar_nuevo_episodio = serializers.BooleanField(write_only=True, required=False, default=False)
+
+    class Meta:
+        model = Historialclinico
+        fields = [
+            'pacientecodigo',
+            'alergias', 'enfermedades', 'motivoconsulta', 'diagnostico',
+            'forzar_nuevo_episodio',
+        ]
+
+    def validate(self, attrs):
+        if not (attrs.get('motivoconsulta') or '').strip():
+            raise serializers.ValidationError('El motivo de consulta es obligatorio.')
+        return attrs
+
+    def create(self, validated):
+        paciente = validated['pacientecodigo']
+        forzar = validated.pop('forzar_nuevo_episodio', False)
+
+        # siguiente episodio para este paciente
+        max_epi = Historialclinico.objects.filter(pacientecodigo=paciente)\
+                                          .aggregate(Max('episodio'))['episodio__max'] or 0
+
+        # posible duplicado en el día por mismo motivo
+        hoy = timezone.localdate()
+        dup = Historialclinico.objects.filter(
+            pacientecodigo=paciente,
+            motivoconsulta=(validated.get('motivoconsulta') or '').strip(),
+            fecha__date=hoy
+        ).first()
+
+        if dup and not forzar:
+            raise serializers.ValidationError({
+                'duplicado': 'Ya existe una HCE hoy con el mismo motivo. Envíe forzar_nuevo_episodio=true para abrir un nuevo episodio.'
+            })
+
+        hce = Historialclinico.objects.create(
+            episodio=max_epi + 1,
+            **validated
+        )
+        return hce
+
+
+class HistorialclinicoListSerializer(serializers.ModelSerializer):
+    paciente_nombre = serializers.CharField(source='pacientecodigo.codusuario.nombre', read_only=True)
+    paciente_apellido = serializers.CharField(source='pacientecodigo.codusuario.apellido', read_only=True)
+
+    class Meta:
+        model = Historialclinico
+        fields = [
+            'id', 'pacientecodigo', 'paciente_nombre', 'paciente_apellido',
+            'episodio', 'fecha',
+            'alergias', 'enfermedades', 'motivoconsulta', 'diagnostico',
+            'updated_at',
+        ]
 
 
 # api/serializers.py - Agregar al final del archivo existente

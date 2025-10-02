@@ -78,16 +78,37 @@ class Tipodeconsulta(models.Model):
 
 
 class Historialclinico(models.Model):
-    pacientecodigo = models.OneToOneField(Paciente, models.DO_NOTHING, db_column='pacientecodigo')
+    # Antes era OneToOne; ahora es FK para permitir múltiples episodios por paciente
+    pacientecodigo = models.ForeignKey(
+        'Paciente',
+        on_delete=models.DO_NOTHING,
+        db_column='pacientecodigo',
+        related_name='historias'
+    )
+
+    # Campos clínicos existentes
     alergias = models.TextField(blank=True, null=True)
     enfermedades = models.TextField(blank=True, null=True)
     motivoconsulta = models.TextField(blank=True, null=True)
     diagnostico = models.TextField(blank=True, null=True)
 
-    class Meta:
-        #managed = False
-        db_table = 'historialclinico'
+    # NUEVOS (ya creados en la BD con tu script)
+    episodio = models.PositiveIntegerField(default=1)     # 1..n por paciente
+    fecha = models.DateTimeField(auto_now_add=True)       # timestamptz DEFAULT now()
+    updated_at = models.DateTimeField(auto_now=True)      # timestamptz DEFAULT now()
 
+    class Meta:
+        db_table = 'historialclinico'
+        constraints = [
+            models.UniqueConstraint(
+                fields=['pacientecodigo', 'episodio'],
+                name='uniq_historial_paciente_episodio'
+            )
+        ]
+        ordering = ['-fecha', '-episodio']
+
+    def __str__(self):
+        return f'HCE paciente={self.pacientecodigo_id} episodio={self.episodio}'
 
 class Servicio(models.Model):
     nombre = models.CharField(max_length=255)

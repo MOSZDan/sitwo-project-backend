@@ -19,11 +19,13 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.filters import SearchFilter, OrderingFilter
 from rest_framework.response import Response
 from rest_framework.decorators import action
+from rest_framework import viewsets, mixins
+from rest_framework.viewsets import GenericViewSet
 from django_filters.rest_framework import DjangoFilterBackend
 
 from .models import (
     Paciente, Consulta, Odontologo, Horario, Tipodeconsulta,
-    Usuario, Tipodeusuario, Vista, Bitacora
+    Usuario, Tipodeusuario, Vista, Bitacora, Historialclinico
 )
 
 from .serializers import (
@@ -38,7 +40,9 @@ from .serializers import (
     TipodeusuarioSerializer,
     VistaSerializer,
     BitacoraSerializer,
-    ReprogramarConsultaSerializer
+    ReprogramarConsultaSerializer,
+    HistorialclinicoCreateSerializer,
+    HistorialclinicoListSerializer
 )
 
 
@@ -320,6 +324,32 @@ class UserProfileView(RetrieveUpdateAPIView):
         except Usuario.DoesNotExist:
             return None
 
+# -------------------- Historias Clínicas (HCE) --------------------
+
+class HistorialclinicoViewSet(mixins.CreateModelMixin,
+                              mixins.ListModelMixin,
+                              GenericViewSet):
+    """
+    Endpoints:
+      - POST /api/historias-clinicas/                (crear HCE; calcula episodio siguiente y valida duplicado por día+motivo)
+      - GET  /api/historias-clinicas/?paciente=<id>  (listar HCE por paciente; ordenado por fecha/episodio)
+    """
+    permission_classes = [IsAuthenticated]
+    queryset = Historialclinico.objects.select_related(
+        'pacientecodigo', 'pacientecodigo__codusuario'
+    ).all()
+
+    def get_serializer_class(self):
+        return (HistorialclinicoCreateSerializer
+                if self.action == 'create'
+                else HistorialclinicoListSerializer)
+
+    def get_queryset(self):
+        qs = super().get_queryset()
+        pid = self.request.query_params.get('paciente')
+        if pid:
+            qs = qs.filter(pacientecodigo_id=pid)
+        return qs.order_by('-fecha', '-episodio')
 
 # -------------------- Bitácora de Auditoría --------------------
 

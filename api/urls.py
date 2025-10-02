@@ -16,6 +16,10 @@ router.register(r"tipos-usuario", views.TipodeusuarioViewSet, basename="tipos-us
 router.register(r"usuarios", views.UsuarioViewSet, basename="usuarios")
 router.register(r"vistas", views.VistaViewSet, basename="vistas")
 router.register(r'bitacora', views.BitacoraViewSet, basename='bitacora')
+
+# 👇 NUEVO: Historias Clínicas (HCE)
+router.register(r"historias-clinicas", views.HistorialclinicoViewSet, basename="historias-clinicas")
+
 urlpatterns = [
     path("health/", views.health),
     path("db/", views.db_info),
