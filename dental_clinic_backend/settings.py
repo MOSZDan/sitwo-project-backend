@@ -63,6 +63,7 @@ CSRF_TRUSTED_ORIGINS = _csv_env(
         "http://127.0.0.1:3000",
         "http://localhost:3000",
         "https://sitwo-project.onrender.com",
+        "https://sitwo-project-backend-vzq2.onrender.com",
     ] if not DEBUG else [
         "http://127.0.0.1:8000",
         "http://localhost:8000",
