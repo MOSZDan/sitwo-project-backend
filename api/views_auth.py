@@ -10,9 +10,6 @@ from django.core.mail import EmailMultiAlternatives
 from django.core.exceptions import ObjectDoesNotExist, MultipleObjectsReturned
 from django.conf import settings
 from django.db import transaction, IntegrityError, DatabaseError
-from .serializers import UserNotificationSettingsSerializer
-from .models import Usuario, Paciente, Odontologo, Recepcionista, Bitacora
-from .serializers import UserNotificationSettingsSerializer
 
 from rest_framework import status
 from rest_framework.decorators import (
@@ -25,12 +22,29 @@ from rest_framework.response import Response
 from rest_framework.authtoken.models import Token
 from rest_framework.views import APIView
 
+from .models import Usuario, Paciente, Odontologo, Recepcionista, Bitacora
+from .serializers import (
+    UserNotificationSettingsSerializer,
+    UsuarioMeSerializer,
+)
 from .serializers_auth import RegisterSerializer
-from .models import Usuario, Paciente, Odontologo, Recepcionista
-from .serializers import UserNotificationSettingsSerializer, UsuarioMeSerializer
-from .serializers_auth import RegisterSerializer
+from .serializers import NotificationPreferencesSerializer
 
 User = get_user_model()
+
+
+# ============================
+# Utils
+# ============================
+def _client_ip(request):
+    """
+    Obtiene la IP del cliente de forma segura detrás de proxies.
+    Siempre devuelve un valor (fallback "0.0.0.0") para no romper la bitácora.
+    """
+    xff = request.META.get("HTTP_X_FORWARDED_FOR")
+    if xff:
+        return xff.split(",")[0].strip()
+    return request.META.get("REMOTE_ADDR") or "0.0.0.0"
 
 
 # ============================
@@ -92,10 +106,10 @@ def auth_register(request):
             # Nombres (hasta 150 chars)
             update_fields = []
             if nombre:
-                dj_user.first_name = nombre[:150];
+                dj_user.first_name = nombre[:150]
                 update_fields.append("first_name")
             if apellido:
-                dj_user.last_name = apellido[:150];
+                dj_user.last_name = apellido[:150]
                 update_fields.append("last_name")
             if update_fields:
                 dj_user.save(update_fields=update_fields)
@@ -114,19 +128,19 @@ def auth_register(request):
             if not created:
                 changed = False
                 if usuario.idtipousuario_id != idtu:
-                    usuario.idtipousuario_id = idtu;
+                    usuario.idtipousuario_id = idtu
                     changed = True
                 if nombre and usuario.nombre != nombre:
-                    usuario.nombre = nombre;
+                    usuario.nombre = nombre
                     changed = True
                 if apellido and usuario.apellido != apellido:
-                    usuario.apellido = apellido;
+                    usuario.apellido = apellido
                     changed = True
                 if telefono is not None and usuario.telefono != telefono:
-                    usuario.telefono = telefono;
+                    usuario.telefono = telefono
                     changed = True
                 if sexo is not None and usuario.sexo != sexo:
-                    usuario.sexo = sexo;
+                    usuario.sexo = sexo
                     changed = True
                 if changed:
                     usuario.save()
@@ -202,26 +216,19 @@ def auth_login(request):
     try:
         usuario = Usuario.objects.get(correoelectronico=email)
 
-        # REGISTRAR LOGIN MANUAL AQUÍ (antes de que responda)
-        # Esto evita que el middleware lo detecte como anónimo
+        # Log de login (tolerante a fallos: jamás rompe el login)
         try:
-            from .middleware import get_client_ip
-
-            # Crear registro manual de login exitoso
             Bitacora.objects.create(
                 accion='login',
                 descripcion=f'Login exitoso - {usuario.nombre} {usuario.apellido}',
                 usuario=usuario,
-                ip_address=get_client_ip(request),
+                ip_address=_client_ip(request),
                 user_agent=request.META.get('HTTP_USER_AGENT', ''),
-                datos_adicionales={
-                    'email': email,
-                    'metodo': 'manual_login_view'
-                }
+                datos_adicionales={'email': email, 'metodo': 'manual_login_view'}
             )
-            print(f"Log manual creado para {usuario.nombre} {usuario.apellido}")
         except Exception as log_error:
-            print(f"Error creando log manual: {log_error}")
+            # Importante: NO lanzar excepción aquí
+            print(f"[Bitacora] No se pudo guardar el log de login: {log_error}")
 
         # Determinar subtipo
         subtipo = "usuario"
@@ -354,10 +361,9 @@ def password_reset_request(request):
                 to=[user.email],
             )
             msg.attach_alternative(html_content, "text/html")
-            # Si el backend de correo no está configurado, evita tirar 500:
+            # Evitar 500 si email backend no está configurado:
             msg.send(fail_silently=True)
         except Exception:
-            # No filtramos detalles; mantenemos respuesta genérica
             pass
 
     # Respuesta uniforme (exista o no el email)
@@ -393,6 +399,7 @@ def password_reset_confirm(request):
     return Response({"ok": True, "message": "Contraseña actualizada correctamente"}, status=status.HTTP_200_OK)
 
 
+# ============================
 # Preferencias de Usuario
 # ============================
 @api_view(["PATCH"])
@@ -421,9 +428,6 @@ def auth_user_settings_update(request):
     return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
 
-from .serializers import NotificationPreferencesSerializer
-
-
 @api_view(["GET", "PATCH"])
 def notification_preferences(request):
     """
@@ -439,7 +443,6 @@ def notification_preferences(request):
         return Response({"detail": "Usuario no encontrado"}, status=status.HTTP_404_NOT_FOUND)
 
     if request.method == "GET":
-        # Obtener preferencias actuales
         data = {
             "notificaciones_email": usuario_instance.notificaciones_email,
             "notificaciones_push": usuario_instance.notificaciones_push,
@@ -447,7 +450,6 @@ def notification_preferences(request):
         return Response(data, status=status.HTTP_200_OK)
 
     elif request.method == "PATCH":
-        # Actualizar preferencias
         serializer = NotificationPreferencesSerializer(instance=usuario_instance, data=request.data, partial=True)
         if serializer.is_valid():
             serializer.save()
