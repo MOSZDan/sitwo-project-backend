@@ -100,7 +100,7 @@ class PacienteViewSet(ReadOnlyModelViewSet):
     queryset = (
         Paciente.objects
         .select_related("codusuario")
-        .filter(codusuario__idtipousuario_id=2)   # 👈 filtro por rol paciente
+        .filter(codusuario__idtipousuario_id=2)
         .all()
     )
     serializer_class = PacienteSerializer
