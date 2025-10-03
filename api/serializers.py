@@ -38,10 +38,11 @@ class PacienteMiniSerializer(serializers.ModelSerializer):
 
 class OdontologoMiniSerializer(serializers.ModelSerializer):
     codusuario = UsuarioMiniSerializer(read_only=True)
+    codigo = serializers.IntegerField(source='codusuario.codigo', read_only=True)
 
     class Meta:
         model = Odontologo
-        fields = ("codusuario", "especialidad", "nromatricula")
+        fields = ("codigo", "codusuario", "especialidad", "nromatricula")
 
 
 class RecepcionistaMiniSerializer(serializers.ModelSerializer):
@@ -116,14 +117,28 @@ class ReprogramarConsultaSerializer(serializers.Serializer):
         Valida que el nuevo horario para reprogramar esté disponible.
         El 'cododontologo' se inyecta desde la vista.
         """
+        from datetime import date
+
         consulta = self.context.get('consulta')
         if not consulta:
             # Este error no debería ocurrir si se usa correctamente desde la vista
             raise serializers.ValidationError("No se encontró la consulta a reprogramar.")
 
+        # VALIDACIÓN 1: No permitir reprogramar citas vencidas
+        if consulta.fecha < date.today():
+            raise serializers.ValidationError(
+                "No se puede reprogramar una cita que ya pasó de fecha. La cita debe ser cancelada."
+            )
+
+        # VALIDACIÓN 2: La nueva fecha debe ser futura
+        if data['fecha'] < date.today():
+            raise serializers.ValidationError(
+                "No se puede reprogramar una cita a una fecha pasada."
+            )
+
         cododontologo = consulta.cododontologo
 
-        # Validar que el nuevo horario no esté ya ocupado por otra cita
+        # VALIDACIÓN 3: Validar que el nuevo horario no esté ya ocupado por otra cita
         if Consulta.objects.filter(
             cododontologo=cododontologo,
             fecha=data['fecha'],
