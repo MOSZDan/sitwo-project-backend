@@ -197,12 +197,14 @@ Si necesitas cancelar o reprogramar tu cita, ponte en contacto con nosotros.
         # consulta.idestadoconsulta_id = 5
         consulta.save()
 
+        # Refrescar desde la BD para obtener todas las relaciones
+        consulta.refresh_from_db()
+
         # TODO: Considera enviar una notificación de reprogramación por email
 
-        return Response(
-            {"detail": "La cita ha sido reprogramada exitosamente."},
-            status=status.HTTP_200_OK
-        )
+        # Devolver la consulta completa actualizada con todas sus relaciones
+        consulta_serializer = ConsultaSerializer(consulta)
+        return Response(consulta_serializer.data, status=status.HTTP_200_OK)
 
 
     # --- NUEVA ACCIÓN: Cancelar Cita (eliminar definitivamente) ---
@@ -210,16 +212,105 @@ Si necesitas cancelar o reprogramar tu cita, ponte en contacto con nosotros.
     def cancelar(self, request, pk=None):
         """
         Cancela una cita eliminándola de la base de datos.
+        Registra la cancelación en la bitácora antes de eliminar.
         """
-        consulta = self.get_object()
+        from datetime import date
+        from .models import Bitacora, Usuario
 
+        consulta = self.get_object()
         consulta_id = consulta.pk
+        consulta_info = f"Cita #{consulta_id} - Paciente: {consulta.codpaciente.codusuario.nombre} {consulta.codpaciente.codusuario.apellido}"
+
+        # Registrar en bitácora antes de eliminar
+        try:
+            usuario = None
+            if request.user.is_authenticated:
+                try:
+                    usuario = Usuario.objects.get(correoelectronico=request.user.email)
+                except Usuario.DoesNotExist:
+                    pass
+
+            from api.middleware import get_client_ip
+            Bitacora.objects.create(
+                accion='cancelar_cita',
+                descripcion=f'Cita cancelada: {consulta_info}',
+                usuario=usuario,
+                ip_address=get_client_ip(request),
+                user_agent=request.META.get('HTTP_USER_AGENT', ''),
+                modelo_afectado='Consulta',
+                objeto_id=consulta_id,
+                datos_adicionales={
+                    'fecha': str(consulta.fecha),
+                    'horario': consulta.idhorario.hora if consulta.idhorario else 'N/A',
+                    'odontologo': f"{consulta.cododontologo.codusuario.nombre} {consulta.cododontologo.codusuario.apellido}" if consulta.cododontologo else 'N/A'
+                }
+            )
+        except Exception as log_error:
+            print(f"[Bitacora] No se pudo guardar el log de cancelación: {log_error}")
+
+        # Eliminar la cita
         consulta.delete()
 
-        # Opcional: enviar notificación de cancelación aquí
+        # TODO: Opcional - enviar notificación de cancelación por email
 
         return Response(
-            {"detail": "La cita ha sido cancelada y eliminada.", "id": consulta_id},
+            {"ok": True, "detail": "La cita ha sido cancelada y eliminada.", "id": consulta_id},
+            status=status.HTTP_200_OK
+        )
+
+    # --- NUEVA ACCIÓN: Eliminar citas vencidas automáticamente ---
+    @action(detail=False, methods=['delete'], url_path='eliminar-vencidas')
+    def eliminar_vencidas(self, request):
+        """
+        Elimina automáticamente todas las citas que ya pasaron de fecha.
+        Esta función puede ser llamada desde el frontend o desde un cron job.
+        """
+        from datetime import date
+        from .models import Bitacora, Usuario
+
+        citas_vencidas = Consulta.objects.filter(fecha__lt=date.today())
+        cantidad = citas_vencidas.count()
+
+        if cantidad == 0:
+            return Response(
+                {"ok": True, "detail": "No hay citas vencidas para eliminar.", "cantidad": 0},
+                status=status.HTTP_200_OK
+            )
+
+        # Registrar en bitácora
+        try:
+            usuario = None
+            if request.user.is_authenticated:
+                try:
+                    usuario = Usuario.objects.get(correoelectronico=request.user.email)
+                except Usuario.DoesNotExist:
+                    pass
+
+            from api.middleware import get_client_ip
+            Bitacora.objects.create(
+                accion='limpiar_citas_vencidas',
+                descripcion=f'Eliminadas {cantidad} citas vencidas',
+                usuario=usuario,
+                ip_address=get_client_ip(request),
+                user_agent=request.META.get('HTTP_USER_AGENT', ''),
+                modelo_afectado='Consulta',
+                datos_adicionales={
+                    'cantidad_eliminadas': cantidad,
+                    'fecha_limpieza': str(date.today())
+                }
+            )
+        except Exception as log_error:
+            print(f"[Bitacora] No se pudo guardar el log de limpieza: {log_error}")
+
+        # Eliminar todas las citas vencidas
+        citas_vencidas.delete()
+
+        return Response(
+            {
+                "ok": True,
+                "detail": f"Se eliminaron {cantidad} citas vencidas.",
+                "cantidad": cantidad
+            },
             status=status.HTTP_200_OK
         )
 
@@ -235,6 +326,36 @@ class HorarioViewSet(ReadOnlyModelViewSet):
     permission_classes = [IsAuthenticated]
     queryset = Horario.objects.all()
     serializer_class = HorarioSerializer
+
+    @action(detail=False, methods=['get'], url_path='disponibles')
+    def disponibles(self, request):
+        """
+        Obtiene horarios disponibles para una fecha y odontólogo específicos.
+        Parámetros: fecha (YYYY-MM-DD), odontologo_id
+        """
+        fecha = request.query_params.get('fecha')
+        odontologo_id = request.query_params.get('odontologo_id')
+
+        if not fecha or not odontologo_id:
+            return Response(
+                {"detail": "Se requieren los parámetros 'fecha' y 'odontologo_id'."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        # Obtener todos los horarios
+        todos_horarios = Horario.objects.all()
+
+        # Filtrar horarios ocupados para ese odontólogo en esa fecha
+        horarios_ocupados = Consulta.objects.filter(
+            cododontologo_id=odontologo_id,
+            fecha=fecha
+        ).values_list('idhorario_id', flat=True)
+
+        # Horarios disponibles = todos - ocupados
+        horarios_disponibles = todos_horarios.exclude(id__in=horarios_ocupados)
+
+        serializer = self.get_serializer(horarios_disponibles, many=True)
+        return Response(serializer.data, status=status.HTTP_200_OK)
 
 
 class TipodeconsultaViewSet(ReadOnlyModelViewSet):

@@ -67,8 +67,16 @@ class AuditMiddleware(MiddlewareMixin):
         if not (200 <= response.status_code < 400):
             return False
 
-        # EXCLUIR login explícitamente para evitar duplicados
-        if '/api/auth/login/' in path:
+        # EXCLUIR endpoints de autenticación para evitar duplicados y bucles
+        exclude_paths = [
+            '/api/auth/login/',
+            '/api/auth/csrf/',
+            '/api/auth/user/',
+            '/api/health/',
+            '/api/db/',
+        ]
+
+        if any(path.startswith(exclude_path) for exclude_path in exclude_paths):
             return False
 
         # Auditar estos endpoints específicos
