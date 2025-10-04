@@ -54,6 +54,34 @@ def health(request):
     return JsonResponse({"ok": True})
 
 
+def db_health(request):
+    """Diagnóstico de conexión a base de datos"""
+    from django.db import connection
+    import os
+
+    try:
+        # Intentar una consulta simple
+        with connection.cursor() as cursor:
+            cursor.execute("SELECT 1")
+            cursor.fetchone()
+
+        db_status = "OK"
+        error_msg = None
+    except Exception as e:
+        db_status = "ERROR"
+        error_msg = str(e)
+
+    return JsonResponse({
+        "database_status": db_status,
+        "database_url_configured": bool(os.getenv("DATABASE_URL")),
+        "database_engine": connection.settings_dict.get('ENGINE', 'Unknown'),
+        "database_name": connection.settings_dict.get('NAME', 'Unknown'),
+        "database_host": connection.settings_dict.get('HOST', 'Unknown'),
+        "database_port": connection.settings_dict.get('PORT', 'Unknown'),
+        "error": error_msg
+    })
+
+
 def db_info(request):
     """Info rápida de la conexión a DB (útil en dev/diagnóstico)."""
     with connection.cursor() as cur:
