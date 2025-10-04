@@ -28,9 +28,8 @@ export DJANGO_SETTINGS_MODULE=dental_clinic_backend.settings
 # El pooler de Supabase puede rechazar conexiones durante el build
 if [[ "$DATABASE_URL" == *":6543/"* ]]; then
     echo "🔄 Detectado pooler de Supabase (puerto 6543), cambiando a conexión directa (puerto 5432)..."
+    # Solo cambiar el puerto de 6543 a 5432, mantener el resto de la URL igual
     export MIGRATION_DATABASE_URL="${DATABASE_URL//:6543\//:5432/}"
-    # Cambiar también pooler.supabase.com por aws-0-us-east-2.pooler.supabase.com
-    export MIGRATION_DATABASE_URL="${MIGRATION_DATABASE_URL//pooler.supabase.com/aws-0-us-east-2.pooler.supabase.com}"
     echo "✅ Usando conexión directa para migraciones"
 else
     export MIGRATION_DATABASE_URL="$DATABASE_URL"
