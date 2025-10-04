@@ -222,6 +222,8 @@ def auth_login(request):
             break  # Si llegamos aquí, la autenticación funcionó
 
         except Exception as e:
+            import logging
+            logger = logging.getLogger(__name__)
             logger.error(f"Error en autenticación, intento {attempt + 1}: {str(e)}")
             if attempt == max_attempts - 1:  # Último intento
                 return Response(
@@ -249,6 +251,8 @@ def auth_login(request):
             break
 
         except Exception as e:
+            import logging
+            logger = logging.getLogger(__name__)
             logger.error(f"Error obteniendo token, intento {attempt + 1}: {str(e)}")
             if attempt == max_attempts - 1:
                 return Response(
@@ -273,6 +277,8 @@ def auth_login(request):
         except Usuario.DoesNotExist:
             return Response({"detail": "Usuario no encontrado en el sistema"}, status=status.HTTP_404_NOT_FOUND)
         except Exception as e:
+            import logging
+            logger = logging.getLogger(__name__)
             logger.error(f"Error obteniendo usuario, intento {attempt + 1}: {str(e)}")
             if attempt == max_attempts - 1:
                 return Response(
@@ -281,55 +287,53 @@ def auth_login(request):
                 )
             continue
 
-        # Log de login (tolerante a fallos: jamás rompe el login)
-        try:
-            Bitacora.objects.create(
-                accion='login',
-                descripcion=f'Login exitoso - {usuario.nombre} {usuario.apellido}',
-                usuario=usuario,
-                ip_address=_client_ip(request),
-                user_agent=request.META.get('HTTP_USER_AGENT', ''),
-                datos_adicionales={'email': email, 'metodo': 'manual_login_view'}
-            )
-        except Exception as log_error:
-            # Importante: NO lanzar excepción aquí
-            print(f"[Bitacora] No se pudo guardar el log de login: {log_error}")
+    # Log de login (tolerante a fallos: jamás rompe el login)
+    try:
+        Bitacora.objects.create(
+            accion='login',
+            descripcion=f'Login exitoso - {usuario.nombre} {usuario.apellido}',
+            usuario=usuario,
+            ip_address=_client_ip(request),
+            user_agent=request.META.get('HTTP_USER_AGENT', ''),
+            datos_adicionales={'email': email, 'metodo': 'manual_login_view'}
+        )
+    except Exception as log_error:
+        # Importante: NO lanzar excepción aquí
+        print(f"[Bitacora] No se pudo guardar el log de login: {log_error}")
 
-        # Determinar subtipo
-        subtipo = "usuario"
-        if hasattr(usuario, "paciente"):
-            subtipo = "paciente"
-        elif hasattr(usuario, "odontologo"):
-            subtipo = "odontologo"
-        elif hasattr(usuario, "recepcionista"):
-            subtipo = "recepcionista"
-        elif usuario.idtipousuario_id == 1:
-            subtipo = "administrador"
+    # Determinar subtipo
+    subtipo = "usuario"
+    if hasattr(usuario, "paciente"):
+        subtipo = "paciente"
+    elif hasattr(usuario, "odontologo"):
+        subtipo = "odontologo"
+    elif hasattr(usuario, "recepcionista"):
+        subtipo = "recepcionista"
+    elif usuario.idtipousuario_id == 1:
+        subtipo = "administrador"
 
-        return Response({
-            "ok": True,
-            "message": "Login exitoso",
-            "token": token.key,
-            "user": {
-                "id": user.id,
-                "email": user.email,
-                "first_name": user.first_name,
-                "last_name": user.last_name,
-                "is_active": user.is_active,
-            },
-            "usuario": {
-                "codigo": usuario.codigo,
-                "nombre": usuario.nombre,
-                "apellido": usuario.apellido,
-                "telefono": usuario.telefono,
-                "sexo": usuario.sexo,
-                "subtipo": subtipo,
-                "idtipousuario": usuario.idtipousuario_id,
-                "recibir_notificaciones": usuario.recibir_notificaciones,
-            }
-        })
-    except Usuario.DoesNotExist:
-        return Response({"detail": "Usuario no encontrado en el sistema"}, status=status.HTTP_404_NOT_FOUND)
+    return Response({
+        "ok": True,
+        "message": "Login exitoso",
+        "token": token.key,
+        "user": {
+            "id": user.id,
+            "email": user.email,
+            "first_name": user.first_name,
+            "last_name": user.last_name,
+            "is_active": user.is_active,
+        },
+        "usuario": {
+            "codigo": usuario.codigo,
+            "nombre": usuario.nombre,
+            "apellido": usuario.apellido,
+            "telefono": usuario.telefono,
+            "sexo": usuario.sexo,
+            "subtipo": subtipo,
+            "idtipousuario": usuario.idtipousuario_id,
+            "recibir_notificaciones": usuario.recibir_notificaciones,
+        }
+    })
 
 
 @api_view(["POST"])
