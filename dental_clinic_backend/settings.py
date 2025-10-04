@@ -168,25 +168,29 @@ WSGI_APPLICATION = "dental_clinic_backend.wsgi.application"
 DATABASE_URL = os.getenv("DATABASE_URL")
 
 if DATABASE_URL:
-    # Configuración mejorada para evitar problemas de encoding
+    # Parsear la URL manualmente para tener más control
     DATABASES = {
         "default": dj_database_url.config(
             env="DATABASE_URL",
             conn_max_age=0,
             conn_health_checks=False,
-            ssl_require=True,
+            ssl_require=False,  # Cambiar a False y manejar SSL en OPTIONS
         )
     }
 
     # Configuración específica para PostgreSQL con encoding UTF-8
+    # Usar sslmode=require en lugar de ssl_require para mejor compatibilidad
     DATABASES['default'].update({
         'CONN_MAX_AGE': 0,
         'AUTOCOMMIT': True,
         'ATOMIC_REQUESTS': False,
         'OPTIONS': {
-            'client_encoding': 'UTF8',
-            'connect_timeout': 10,
-            'options': '-c statement_timeout=30000',
+            'sslmode': 'require',
+            'connect_timeout': 30,
+            'keepalives': 1,
+            'keepalives_idle': 30,
+            'keepalives_interval': 10,
+            'keepalives_count': 5,
         },
     })
 
