@@ -168,28 +168,42 @@ WSGI_APPLICATION = "dental_clinic_backend.wsgi.application"
 DATABASE_URL = os.getenv("DATABASE_URL")
 
 if DATABASE_URL:
+    # Configuración mejorada para Supabase + Render
     DATABASES = {
         "default": dj_database_url.config(
             env="DATABASE_URL",
-            conn_max_age=0,  # Sin pooling de conexiones para evitar conflictos con Supabase pooler
-            conn_health_checks=False,  # Desactivar health checks que pueden interferir
+            conn_max_age=0,  # Sin pooling de conexiones
+            conn_health_checks=False,  # Desactivar health checks
             ssl_require=True,
         )
     }
 
-    # Configuraciones específicas para pooler de Supabase en Render
+    # Configuraciones específicas para resolver problemas de encoding y pooler
     DATABASES['default'].update({
         'OPTIONS': {
             'sslmode': 'require',
-            'connect_timeout': 30,  # Timeout más largo para pooler
+            'connect_timeout': 30,
             'application_name': 'dental_clinic_render',
-            # Evitar problemas con pooler de transacciones
-            'options': '-c default_transaction_isolation=read_committed'
+            'client_encoding': 'UTF8',  # Forzar encoding UTF8
+            'options': '-c default_transaction_isolation=read_committed -c client_encoding=UTF8'
         },
-        'CONN_MAX_AGE': 0,  # Sin persistencia de conexiones
+        'CONN_MAX_AGE': 0,
         'AUTOCOMMIT': True,
-        'ATOMIC_REQUESTS': False,  # Importante: evitar transacciones automáticas con pooler
+        'ATOMIC_REQUESTS': False,
+        'TEST': {
+            'NAME': None,  # Evitar problemas en testing
+        }
     })
+
+    # Configuración adicional para evitar problemas de encoding
+    import django.db.backends.postgresql.base as postgresql_base
+    if hasattr(postgresql_base, 'DatabaseWrapper'):
+        original_get_new_connection = postgresql_base.DatabaseWrapper.get_new_connection
+        def patched_get_new_connection(self, conn_params):
+            conn_params.setdefault('options', '-c client_encoding=UTF8')
+            return original_get_new_connection(self, conn_params)
+        postgresql_base.DatabaseWrapper.get_new_connection = patched_get_new_connection
+
 else:
     # Fallback para desarrollo local con SQLite
     DATABASES = {
