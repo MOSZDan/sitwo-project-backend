@@ -140,7 +140,7 @@ MIDDLEWARE = [
     "django.contrib.auth.middleware.AuthenticationMiddleware",
     "django.contrib.messages.middleware.MessageMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
-    # "api.middleware.AuditMiddleware",  # TEMPORALMENTE COMENTADO hasta resolver conexión BD
+    "api.middleware.AuditMiddleware",  # TEMPORALMENTE COMENTADO hasta resolver conexión BD
 ]
 
 ROOT_URLCONF = "dental_clinic_backend.urls"
