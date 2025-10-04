@@ -221,7 +221,7 @@ def auth_login(request):
             Bitacora.objects.create(
                 accion='login',
                 descripcion=f'Login exitoso - {usuario.nombre} {usuario.apellido}',
-                codusuario=usuario.codigo,
+                usuario=usuario,
                 ip_address=_client_ip(request),
                 user_agent=request.META.get('HTTP_USER_AGENT', ''),
                 datos_adicionales={'email': email, 'metodo': 'manual_login_view'}

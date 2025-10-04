@@ -108,7 +108,7 @@ class AuditMiddleware(MiddlewareMixin):
                 Bitacora.objects.create(
                     accion=accion,
                     descripcion=descripcion,
-                    codusuario=usuario.codigo if usuario else None,
+                    usuario=usuario,
                     ip_address=ip_address,
                     user_agent=user_agent,
                     modelo_afectado=modelo_afectado,
