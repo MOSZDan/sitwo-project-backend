@@ -197,7 +197,7 @@ def auth_register(request):
 @permission_classes([AllowAny])  # público
 def auth_login(request):
     """
-    Inicio de sesión con email/password
+    Login de usuario con manejo robusto de problemas de encoding PostgreSQL
     Devuelve información del usuario y token de autenticación
     """
     email = (request.data.get("email") or "").strip().lower()
@@ -205,16 +205,81 @@ def auth_login(request):
     if not email or not password:
         return Response({"detail": "Email y contraseña son requeridos"}, status=status.HTTP_400_BAD_REQUEST)
 
-    user = authenticate(username=email, password=password)
+    # Autenticación con reintentos para manejar problemas de encoding
+    user = None
+    max_attempts = 3
+
+    for attempt in range(max_attempts):
+        try:
+            # Cerrar conexión si hay problemas previos
+            if attempt > 0:
+                from django.db import connection
+                connection.close()
+                import time
+                time.sleep(1)
+
+            user = authenticate(username=email, password=password)
+            break  # Si llegamos aquí, la autenticación funcionó
+
+        except Exception as e:
+            logger.error(f"Error en autenticación, intento {attempt + 1}: {str(e)}")
+            if attempt == max_attempts - 1:  # Último intento
+                return Response(
+                    {"detail": "Error del servidor. Intenta nuevamente en unos momentos."},
+                    status=status.HTTP_503_SERVICE_UNAVAILABLE
+                )
+            continue
+
     if not user:
         return Response({"detail": "Credenciales inválidas"}, status=status.HTTP_401_UNAUTHORIZED)
     if not user.is_active:
         return Response({"detail": "Cuenta desactivada"}, status=status.HTTP_401_UNAUTHORIZED)
 
-    token, _ = Token.objects.get_or_create(user=user)
+    # Obtener o crear token con reintentos
+    token = None
+    for attempt in range(max_attempts):
+        try:
+            if attempt > 0:
+                from django.db import connection
+                connection.close()
+                import time
+                time.sleep(1)
 
-    try:
-        usuario = Usuario.objects.get(correoelectronico=email)
+            token, _ = Token.objects.get_or_create(user=user)
+            break
+
+        except Exception as e:
+            logger.error(f"Error obteniendo token, intento {attempt + 1}: {str(e)}")
+            if attempt == max_attempts - 1:
+                return Response(
+                    {"detail": "Error del servidor. Intenta nuevamente."},
+                    status=status.HTTP_503_SERVICE_UNAVAILABLE
+                )
+            continue
+
+    # Obtener información del usuario con reintentos
+    usuario = None
+    for attempt in range(max_attempts):
+        try:
+            if attempt > 0:
+                from django.db import connection
+                connection.close()
+                import time
+                time.sleep(1)
+
+            usuario = Usuario.objects.get(correoelectronico=email)
+            break
+
+        except Usuario.DoesNotExist:
+            return Response({"detail": "Usuario no encontrado en el sistema"}, status=status.HTTP_404_NOT_FOUND)
+        except Exception as e:
+            logger.error(f"Error obteniendo usuario, intento {attempt + 1}: {str(e)}")
+            if attempt == max_attempts - 1:
+                return Response(
+                    {"detail": "Error del servidor. Intenta nuevamente."},
+                    status=status.HTTP_503_SERVICE_UNAVAILABLE
+                )
+            continue
 
         # Log de login (tolerante a fallos: jamás rompe el login)
         try:
