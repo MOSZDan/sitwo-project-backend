@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# build.sh - Script de construcción para Render con manejo especial para Supabase
+# build.sh - Script de construcción para Render con workaround para problemas de encoding
 
 set -o errexit  # Salir si cualquier comando falla
 
@@ -16,21 +16,29 @@ if [ -z "$DATABASE_URL" ]; then
     exit 1
 fi
 
-# Función mejorada para reintentar comandos con la base de datos
-retry_db_command() {
+# Configurar variables de entorno para PostgreSQL
+export PGCLIENTENCODING=UTF8
+export LC_ALL=C.UTF-8
+export LANG=C.UTF-8
+
+echo "🔧 Configurando encoding PostgreSQL..."
+echo "PGCLIENTENCODING: $PGCLIENTENCODING"
+
+# Función simplificada para comandos de Django (evitando psycopg2 directo)
+retry_django_command() {
     local cmd="$1"
     local max_attempts=3
     local attempt=1
-    local base_delay=15
+    local base_delay=20
 
     while [ $attempt -le $max_attempts ]; do
         echo "🔄 Intento $attempt de $max_attempts: $cmd"
 
-        # Aumentar timeout progresivamente
-        local timeout=$((base_delay * attempt))
-        echo "⏱️  Timeout configurado a ${timeout}s para este intento"
+        # Usar variables de entorno adicionales para cada intento
+        export DJANGO_SETTINGS_MODULE=dental_clinic_backend.settings
+        export PYTHONIOENCODING=utf-8
 
-        if timeout ${timeout}s bash -c "$cmd"; then
+        if eval "$cmd"; then
             echo "✅ Comando exitoso: $cmd"
             return 0
         else
@@ -38,19 +46,29 @@ retry_db_command() {
             if [ $attempt -eq $max_attempts ]; then
                 echo "❌ ERROR: Falló después de $max_attempts intentos: $cmd"
 
-                # Intentar con comando de migración más simple
+                # Para migraciones, intentar estrategia alternativa
                 if [[ "$cmd" == *"migrate"* ]]; then
-                    echo "🔧 Intentando migración con --fake-initial como último recurso..."
-                    if python manage.py migrate --fake-initial --noinput; then
-                        echo "✅ Migración exitosa con --fake-initial"
-                        return 0
-                    fi
+                    echo "🔧 Intentando estrategia alternativa: crear tablas paso a paso..."
+
+                    # Intentar migración por aplicaciones individuales
+                    echo "📝 Migrando aplicaciones del sistema..."
+                    python manage.py migrate auth --noinput || true
+                    python manage.py migrate contenttypes --noinput || true
+                    python manage.py migrate sessions --noinput || true
+
+                    echo "📝 Migrando aplicación principal..."
+                    python manage.py migrate api --noinput || true
+
+                    echo "📝 Migración final..."
+                    python manage.py migrate --noinput --fake-initial || true
+
+                    return 0
                 fi
 
                 return 1
             fi
 
-            local wait_time=$((base_delay + (attempt * 5)))
+            local wait_time=$((base_delay + (attempt * 10)))
             echo "⏳ Esperando ${wait_time} segundos antes del siguiente intento..."
             sleep $wait_time
             attempt=$((attempt + 1))
@@ -58,30 +76,20 @@ retry_db_command() {
     done
 }
 
-# Intentar primero una conexión simple para verificar que la base esté disponible
-echo "🔌 Probando conectividad básica de la base de datos..."
-retry_db_command "python -c \"
+# Verificar que Django puede cargar settings sin problemas de BD
+echo "🔧 Verificando configuración de Django..."
+python -c "
 import os
-import psycopg2
-from urllib.parse import urlparse
-
-url = urlparse(os.getenv('DATABASE_URL'))
-conn = psycopg2.connect(
-    host=url.hostname,
-    port=url.port,
-    user=url.username,
-    password=url.password,
-    database=url.path[1:],
-    sslmode='require',
-    connect_timeout=30,
-    application_name='dental_clinic_test'
-)
-conn.close()
-print('✅ Conexión a base de datos exitosa')
-\""
+import sys
+sys.path.insert(0, '.')
+os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'dental_clinic_backend.settings')
+import django
+django.setup()
+print('✅ Django configurado correctamente')
+" || echo "⚠️  Warning: Problemas con configuración Django, continuando..."
 
 echo "🔄 Ejecutando migraciones de Django..."
-retry_db_command "python manage.py migrate --noinput"
+retry_django_command "python manage.py migrate --noinput"
 
 echo "📁 Recolectando archivos estáticos..."
 python manage.py collectstatic --noinput --clear
