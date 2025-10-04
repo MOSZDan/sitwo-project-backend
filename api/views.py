@@ -4,6 +4,7 @@ from django.contrib.auth import get_user_model
 from django.db import connection
 from django.core.mail import send_mail
 from django.conf import settings
+from django.http import JsonResponse
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_http_methods
 from django.db.models import Q
@@ -124,6 +125,8 @@ class ConsultaViewSet(ModelViewSet):
     )
     filter_backends = [DjangoFilterBackend]
     filterset_fields = ['codpaciente', 'fecha']
+
+
 
     def get_serializer_class(self):
         # --- MODIFICACIÓN: Añadir el nuevo serializador ---
@@ -434,6 +437,9 @@ class VistaViewSet(ModelViewSet):
         data = VistaSerializer(vistas, many=True).data
         return Response(data, status=200)
 
+
+def ping(_):
+    return JsonResponse({"ok": True})
 
 # -------------------- Perfil de Usuario --------------------
 

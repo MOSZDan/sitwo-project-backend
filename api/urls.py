@@ -3,6 +3,9 @@ from django.urls import path, include
 from rest_framework.routers import DefaultRouter
 from . import views, views_auth
 from .views import UserProfileView
+from django.urls import path
+
+from .views import ping
 
 router = DefaultRouter()
 router.register(r"pacientes", views.PacienteViewSet, basename="pacientes")
@@ -24,7 +27,7 @@ urlpatterns = [
     path("health/", views.health),
     path("db/", views.db_info),
     path("users/count/", views.users_count),
-
+    path("ping/", ping),
     # Auth
     path("auth/csrf/", views_auth.csrf_token),
     path("auth/register/", views_auth.auth_register),
