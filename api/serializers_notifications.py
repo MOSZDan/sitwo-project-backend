@@ -1,6 +1,6 @@
 # api/serializers_notifications.py
 from rest_framework import serializers
-from .models import (
+from .models_notifications import (
     TipoNotificacion, CanalNotificacion, PreferenciaNotificacion,
     DispositivoMovil, HistorialNotificacion, PlantillaNotificacion
 )

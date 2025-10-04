@@ -89,6 +89,10 @@ print('✅ Django configurado correctamente')
 " || echo "⚠️  Warning: Problemas con configuración Django, continuando..."
 
 echo "🔄 Ejecutando migraciones de Django..."
+# Crear migraciones para el nuevo modelo Vista
+echo "📝 Creando migraciones para modelos nuevos..."
+python manage.py makemigrations api --noinput || echo "⚠️  No hay cambios para migrar"
+
 retry_django_command "python manage.py migrate --noinput"
 
 echo "📁 Recolectando archivos estáticos..."
