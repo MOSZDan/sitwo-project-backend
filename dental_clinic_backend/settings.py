@@ -168,7 +168,7 @@ WSGI_APPLICATION = "dental_clinic_backend.wsgi.application"
 DATABASE_URL = os.getenv("DATABASE_URL")
 
 if DATABASE_URL:
-    # Configuración ultra-simplificada para evitar problemas de encoding
+    # Configuración mejorada para evitar problemas de encoding
     DATABASES = {
         "default": dj_database_url.config(
             env="DATABASE_URL",
@@ -178,12 +178,21 @@ if DATABASE_URL:
         )
     }
 
-    # Solo los parámetros esenciales
+    # Configuración específica para PostgreSQL con encoding UTF-8
     DATABASES['default'].update({
         'CONN_MAX_AGE': 0,
         'AUTOCOMMIT': True,
         'ATOMIC_REQUESTS': False,
+        'OPTIONS': {
+            'client_encoding': 'UTF8',
+            'connect_timeout': 10,
+            'options': '-c statement_timeout=30000',
+        },
     })
+
+    # Asegurar que el ENGINE sea correcto
+    if 'postgres' in DATABASE_URL:
+        DATABASES['default']['ENGINE'] = 'django.db.backends.postgresql'
 
 else:
     # Fallback para desarrollo local con SQLite

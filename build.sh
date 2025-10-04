@@ -16,65 +16,17 @@ if [ -z "$DATABASE_URL" ]; then
     exit 1
 fi
 
-# Configurar variables de entorno para PostgreSQL
+# Configurar variables de entorno para PostgreSQL - MÁS COMPLETO
 export PGCLIENTENCODING=UTF8
-export LC_ALL=C.UTF-8
-export LANG=C.UTF-8
+export LC_ALL=en_US.UTF-8
+export LANG=en_US.UTF-8
+export PYTHONIOENCODING=utf-8
+export DJANGO_SETTINGS_MODULE=dental_clinic_backend.settings
 
 echo "🔧 Configurando encoding PostgreSQL..."
 echo "PGCLIENTENCODING: $PGCLIENTENCODING"
-
-# Función simplificada para comandos de Django (evitando psycopg2 directo)
-retry_django_command() {
-    local cmd="$1"
-    local max_attempts=3
-    local attempt=1
-    local base_delay=20
-
-    while [ $attempt -le $max_attempts ]; do
-        echo "🔄 Intento $attempt de $max_attempts: $cmd"
-
-        # Usar variables de entorno adicionales para cada intento
-        export DJANGO_SETTINGS_MODULE=dental_clinic_backend.settings
-        export PYTHONIOENCODING=utf-8
-
-        if eval "$cmd"; then
-            echo "✅ Comando exitoso: $cmd"
-            return 0
-        else
-            echo "⚠️  Fallo en intento $attempt"
-            if [ $attempt -eq $max_attempts ]; then
-                echo "❌ ERROR: Falló después de $max_attempts intentos: $cmd"
-
-                # Para migraciones, intentar estrategia alternativa
-                if [[ "$cmd" == *"migrate"* ]]; then
-                    echo "🔧 Intentando estrategia alternativa: crear tablas paso a paso..."
-
-                    # Intentar migración por aplicaciones individuales
-                    echo "📝 Migrando aplicaciones del sistema..."
-                    python manage.py migrate auth --noinput || true
-                    python manage.py migrate contenttypes --noinput || true
-                    python manage.py migrate sessions --noinput || true
-
-                    echo "📝 Migrando aplicación principal..."
-                    python manage.py migrate api --noinput || true
-
-                    echo "📝 Migración final..."
-                    python manage.py migrate --noinput --fake-initial || true
-
-                    return 0
-                fi
-
-                return 1
-            fi
-
-            local wait_time=$((base_delay + (attempt * 10)))
-            echo "⏳ Esperando ${wait_time} segundos antes del siguiente intento..."
-            sleep $wait_time
-            attempt=$((attempt + 1))
-        fi
-    done
-}
+echo "LC_ALL: $LC_ALL"
+echo "LANG: $LANG"
 
 # Verificar que Django puede cargar settings sin problemas de BD
 echo "🔧 Verificando configuración de Django..."
@@ -93,13 +45,36 @@ echo "🔄 Ejecutando migraciones de Django..."
 echo "📝 Creando migraciones para modelos nuevos..."
 python manage.py makemigrations api --noinput || echo "⚠️  No hay cambios para migrar"
 
-retry_django_command "python manage.py migrate --noinput"
+# Ejecutar migraciones con reintentos
+echo "📝 Aplicando migraciones a la base de datos..."
+max_attempts=3
+attempt=1
+
+while [ $attempt -le $max_attempts ]; do
+    echo "🔄 Intento $attempt de $max_attempts: python manage.py migrate --noinput"
+
+    if python manage.py migrate --noinput; then
+        echo "✅ Migraciones aplicadas exitosamente"
+        break
+    else
+        echo "⚠️  Fallo en intento $attempt"
+        if [ $attempt -eq $max_attempts ]; then
+            echo "⚠️  No se pudieron aplicar todas las migraciones después de $max_attempts intentos"
+            echo "⚠️  Continuando con el deployment - las migraciones se aplicarán en el siguiente deploy"
+        else
+            wait_time=$((20 + (attempt * 10)))
+            echo "⏳ Esperando ${wait_time} segundos antes del siguiente intento..."
+            sleep $wait_time
+        fi
+        attempt=$((attempt + 1))
+    fi
+done
 
 echo "📁 Recolectando archivos estáticos..."
 python manage.py collectstatic --noinput --clear
 
 # Inicializar notificaciones si el comando existe
 echo "🔔 Inicializando sistema de notificaciones..."
-python manage.py init_notifications || echo "⚠️  Comando init_notifications no encontrado, continuando..."
+python manage.py init_notifications 2>/dev/null || echo "⚠️  Comando init_notifications no encontrado, continuando..."
 
 echo "✅ Build completado exitosamente!"
