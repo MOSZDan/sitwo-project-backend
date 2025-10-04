@@ -10,7 +10,7 @@ import requests
 import json
 
 from ..models import Usuario
-from ..models import (
+from ..models_notifications import (
     TipoNotificacion, CanalNotificacion, PreferenciaNotificacion,
     DispositivoMovil, HistorialNotificacion, PlantillaNotificacion
 )
