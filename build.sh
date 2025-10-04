@@ -24,6 +24,18 @@ export LANG=C.UTF-8
 export PYTHONIOENCODING=utf-8
 export DJANGO_SETTINGS_MODULE=dental_clinic_backend.settings
 
+# IMPORTANTE: Convertir URL del pooler (puerto 6543) a conexión directa (puerto 5432)
+# El pooler de Supabase puede rechazar conexiones durante el build
+if [[ "$DATABASE_URL" == *":6543/"* ]]; then
+    echo "🔄 Detectado pooler de Supabase (puerto 6543), cambiando a conexión directa (puerto 5432)..."
+    export MIGRATION_DATABASE_URL="${DATABASE_URL//:6543\//:5432/}"
+    # Cambiar también pooler.supabase.com por aws-0-us-east-2.pooler.supabase.com
+    export MIGRATION_DATABASE_URL="${MIGRATION_DATABASE_URL//pooler.supabase.com/aws-0-us-east-2.pooler.supabase.com}"
+    echo "✅ Usando conexión directa para migraciones"
+else
+    export MIGRATION_DATABASE_URL="$DATABASE_URL"
+fi
+
 echo "🔧 Configurando encoding PostgreSQL..."
 echo "PGCLIENTENCODING: $PGCLIENTENCODING"
 echo "LC_ALL: $LC_ALL"
@@ -44,7 +56,7 @@ print('✅ Django configurado correctamente')
 echo "🔄 Ejecutando migraciones de Django..."
 # Crear migraciones para el nuevo modelo Vista
 echo "📝 Creando migraciones para modelos nuevos..."
-python manage.py makemigrations api --noinput || echo "⚠️  No hay cambios para migrar"
+DATABASE_URL="$MIGRATION_DATABASE_URL" python manage.py makemigrations api --noinput || echo "⚠️  No hay cambios para migrar"
 
 # Ejecutar migraciones con reintentos y manejo de errores mejorado
 echo "📝 Aplicando migraciones a la base de datos..."
@@ -54,7 +66,8 @@ attempt=1
 while [ $attempt -le $max_attempts ]; do
     echo "🔄 Intento $attempt de $max_attempts: python manage.py migrate --noinput"
 
-    if python manage.py migrate --noinput 2>&1; then
+    # Usar la URL de migración directa
+    if DATABASE_URL="$MIGRATION_DATABASE_URL" python manage.py migrate --noinput 2>&1; then
         echo "✅ Migraciones aplicadas exitosamente"
         break
     else
@@ -81,6 +94,6 @@ python manage.py collectstatic --noinput --clear
 
 # Inicializar notificaciones si el comando existe
 echo "🔔 Inicializando sistema de notificaciones..."
-python manage.py init_notifications 2>/dev/null || echo "⚠️  Comando init_notifications no encontrado, continuando..."
+DATABASE_URL="$MIGRATION_DATABASE_URL" python manage.py init_notifications 2>/dev/null || echo "⚠️  Comando init_notifications no encontrado, continuando..."
 
 echo "✅ Build completado exitosamente!"
