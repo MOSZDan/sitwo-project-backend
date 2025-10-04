@@ -168,41 +168,67 @@ WSGI_APPLICATION = "dental_clinic_backend.wsgi.application"
 DATABASE_URL = os.getenv("DATABASE_URL")
 
 if DATABASE_URL:
-    # Configuración mejorada para Supabase + Render
+    # Configuración simplificada y robusta para Supabase + Render
     DATABASES = {
         "default": dj_database_url.config(
             env="DATABASE_URL",
-            conn_max_age=0,  # Sin pooling de conexiones
-            conn_health_checks=False,  # Desactivar health checks
+            conn_max_age=0,
+            conn_health_checks=False,
             ssl_require=True,
         )
     }
 
-    # Configuraciones específicas para resolver problemas de encoding y pooler
+    # Configurar parámetros específicos para resolver problemas de encoding
     DATABASES['default'].update({
         'OPTIONS': {
             'sslmode': 'require',
-            'connect_timeout': 30,
+            'connect_timeout': 60,  # Timeout más largo
             'application_name': 'dental_clinic_render',
-            'client_encoding': 'UTF8',  # Forzar encoding UTF8
-            'options': '-c default_transaction_isolation=read_committed -c client_encoding=UTF8'
+            'client_encoding': 'UTF8',
+            'server_side_binding': False,  # Importante para evitar problemas de encoding
         },
         'CONN_MAX_AGE': 0,
         'AUTOCOMMIT': True,
         'ATOMIC_REQUESTS': False,
         'TEST': {
-            'NAME': None,  # Evitar problemas en testing
+            'NAME': None,
         }
     })
 
-    # Configuración adicional para evitar problemas de encoding
-    import django.db.backends.postgresql.base as postgresql_base
-    if hasattr(postgresql_base, 'DatabaseWrapper'):
-        original_get_new_connection = postgresql_base.DatabaseWrapper.get_new_connection
-        def patched_get_new_connection(self, conn_params):
-            conn_params.setdefault('options', '-c client_encoding=UTF8')
-            return original_get_new_connection(self, conn_params)
-        postgresql_base.DatabaseWrapper.get_new_connection = patched_get_new_connection
+    # Asegurar que la URL tenga los parámetros correctos
+    import urllib.parse
+    parsed_url = urllib.parse.urlparse(DATABASE_URL)
+
+    # Reconstruir la URL con parámetros de encoding explícitos
+    query_params = urllib.parse.parse_qs(parsed_url.query)
+    query_params['client_encoding'] = ['UTF8']
+    query_params['application_name'] = ['dental_clinic_render']
+
+    new_query = urllib.parse.urlencode(query_params, doseq=True)
+    new_url = urllib.parse.urlunparse((
+        parsed_url.scheme,
+        parsed_url.netloc,
+        parsed_url.path,
+        parsed_url.params,
+        new_query,
+        parsed_url.fragment
+    ))
+
+    # Actualizar la configuración con la URL modificada
+    import dj_database_url
+    DATABASES['default'] = dj_database_url.parse(new_url)
+    DATABASES['default'].update({
+        'CONN_MAX_AGE': 0,
+        'AUTOCOMMIT': True,
+        'ATOMIC_REQUESTS': False,
+        'OPTIONS': {
+            'sslmode': 'require',
+            'connect_timeout': 60,
+            'application_name': 'dental_clinic_render',
+            'client_encoding': 'UTF8',
+            'server_side_binding': False,
+        }
+    })
 
 else:
     # Fallback para desarrollo local con SQLite
