@@ -17,8 +17,24 @@ Including another URLconf
 # dental_clinic_backend/urls.py
 from django.contrib import admin
 from django.urls import path, include
+from django.http import JsonResponse
+from django.views.decorators.csrf import csrf_exempt
+
+def api_welcome(request):
+    """Vista de bienvenida para la API"""
+    return JsonResponse({
+        "message": "🦷 Clínica Dental API - Backend funcionando correctamente",
+        "version": "1.0.0",
+        "status": "online",
+        "endpoints": {
+            "admin": "/admin/",
+            "api": "/api/",
+            "documentation": "/api/docs/" if hasattr(request, 'user') else "Coming soon"
+        }
+    })
 
 urlpatterns = [
+    path("", api_welcome, name="welcome"),  # Vista de bienvenida para la raíz
     path("admin/", admin.site.urls),
     path("api/", include("api.urls")),
 ]

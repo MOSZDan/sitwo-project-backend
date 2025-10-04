@@ -305,242 +305,26 @@ class Tipopago(models.Model):
         #managed = False
         db_table = 'tipopago'
 
-class Vista(models.Model):
-    PLATAFORMA_WEB = "web"
-    PLATAFORMA_MOVIL = "mobile"
-    PLATAFORMA_CHOICES = (
-        (PLATAFORMA_WEB, "Web"),
-        (PLATAFORMA_MOVIL, "Móvil"),
-    )
-
-    # Código único para referenciar en FE o guardarlo como "slug"
-    codigo = models.CharField(max_length=80, unique=True)
-    nombre = models.CharField(max_length=120)
-    ruta = models.CharField(max_length=200, blank=True, default="")  # ej. /pacientes o /agenda
-    plataforma = models.CharField(max_length=10, choices=PLATAFORMA_CHOICES, default=PLATAFORMA_WEB)
-    descripcion = models.TextField(blank=True, default="")
-
-    # QUIÉNES PUEDEN VER ESTA VISTA (roles)
-    roles_permitidos = models.ManyToManyField(
-        Tipodeusuario,
-        related_name="vistas_permitidas",
-        blank=True,
-    )
-
-    class Meta:
-        db_table = "vista"
-        verbose_name = "Vista"
-        verbose_name_plural = "Vistas"
-        ordering = ("plataforma", "nombre")
-
-    def __str__(self):
-        return f"{self.get_plataforma_display()} | {self.nombre} ({self.codigo})"
-
-
-# api/models.py - Agregar al final del archivo existente
+# ============================================================================
+# TABLA DE AUDITORÍA
+# ============================================================================
 
 class Bitacora(models.Model):
-    ACCION_CHOICES = [
-        ('registro', 'Registro de usuario'),
-        ('login', 'Inicio de sesión'),
-        ('logout', 'Cierre de sesión'),
-        ('crear_cita', 'Crear cita'),
-        ('modificar_cita', 'Modificar cita'),
-        ('eliminar_cita', 'Eliminar cita'),
-        ('crear_paciente', 'Crear paciente'),
-        ('modificar_paciente', 'Modificar paciente'),
-        ('crear_usuario', 'Crear usuario'),
-        ('modificar_usuario', 'Modificar usuario'),
-        ('eliminar_usuario', 'Eliminar usuario'),
-        ('acceso_dashboard', 'Acceso al dashboard'),
-        ('otro', 'Otra acción'),
-    ]
-
-    # Información del evento
-    accion = models.CharField(max_length=50, choices=ACCION_CHOICES)
-    descripcion = models.TextField(blank=True, null=True)
-    fecha_hora = models.DateTimeField(auto_now_add=True)
-
-    # Usuario (puede ser null si es antes del login)
-    usuario = models.ForeignKey(
-        Usuario,
-        on_delete=models.SET_NULL,
-        null=True,
-        blank=True,
-        db_column='codusuario'
-    )
-
-    # Información de la sesión/request
+    id = models.AutoField(primary_key=True)
+    usuario = models.ForeignKey(Usuario, on_delete=models.CASCADE, db_column='codusuario')
+    accion = models.CharField(max_length=100)
+    tabla_afectada = models.CharField(max_length=100)
+    registro_id = models.IntegerField()
+    valores_anteriores = models.JSONField(null=True, blank=True)
+    valores_nuevos = models.JSONField(null=True, blank=True)
     ip_address = models.GenericIPAddressField()
-    user_agent = models.TextField(blank=True, null=True)
-
-    # Información adicional del evento
-    modelo_afectado = models.CharField(max_length=100, blank=True, null=True)  # ej: 'Consulta', 'Usuario'
-    objeto_id = models.IntegerField(blank=True, null=True)  # ID del objeto afectado
-
-    # Datos extra en formato JSON
-    datos_adicionales = models.JSONField(blank=True, null=True)
+    user_agent = models.TextField()
+    timestamp = models.DateTimeField(auto_now_add=True)
 
     class Meta:
         db_table = 'bitacora'
-        ordering = ['-fecha_hora']
+        verbose_name = 'Bitácora'
+        verbose_name_plural = 'Bitácoras'
 
     def __str__(self):
-        usuario_str = f"{self.usuario.nombre} {self.usuario.apellido}" if self.usuario else "Usuario anónimo"
-        return f"{self.get_accion_display()} - {usuario_str} - {self.fecha_hora.strftime('%d/%m/%Y %H:%M')}"
-
-# ============================================================================
-# MODELOS DE NOTIFICACIONES
-# ============================================================================
-
-class TipoNotificacion(models.Model):
-    """
-    Tipos de notificaciones disponibles en el sistema
-    """
-    nombre = models.CharField(max_length=100, unique=True)
-    descripcion = models.TextField(blank=True, null=True)
-    activo = models.BooleanField(default=True)
-
-    class Meta:
-        db_table = 'tiponotificacion'
-        verbose_name = 'Tipo de Notificación'
-        verbose_name_plural = 'Tipos de Notificación'
-
-    def __str__(self):
-        return self.nombre
-
-
-class CanalNotificacion(models.Model):
-    """
-    Canales por los cuales se pueden enviar notificaciones
-    """
-    CANALES = [
-        ('email', 'Correo Electrónico'),
-        ('push', 'Notificación Push'),
-        ('sms', 'SMS'),
-        ('whatsapp', 'WhatsApp'),
-    ]
-
-    nombre = models.CharField(max_length=50, choices=CANALES, unique=True)
-    descripcion = models.TextField(blank=True, null=True)
-    activo = models.BooleanField(default=True)
-
-    class Meta:
-        db_table = 'canalnotificacion'
-        verbose_name = 'Canal de Notificación'
-        verbose_name_plural = 'Canales de Notificación'
-
-    def __str__(self):
-        return self.get_nombre_display()
-
-
-class PreferenciaNotificacion(models.Model):
-    """
-    Preferencias de notificación por usuario
-    """
-    usuario = models.ForeignKey(Usuario, on_delete=models.CASCADE, db_column='codusuario')
-    tipo_notificacion = models.ForeignKey(TipoNotificacion, on_delete=models.CASCADE, db_column='idtiponotificacion')
-    canal_notificacion = models.ForeignKey(CanalNotificacion, on_delete=models.CASCADE, db_column='idcanalnotificacion')
-    activo = models.BooleanField(default=True)
-    fecha_creacion = models.DateTimeField(auto_now_add=True)
-    fecha_actualizacion = models.DateTimeField(auto_now=True)
-
-    class Meta:
-        db_table = 'preferencianotificacion'
-        unique_together = ['usuario', 'tipo_notificacion', 'canal_notificacion']
-        verbose_name = 'Preferencia de Notificación'
-        verbose_name_plural = 'Preferencias de Notificación'
-
-    def __str__(self):
-        return f"{self.usuario.nombre} - {self.tipo_notificacion.nombre} - {self.canal_notificacion.nombre}"
-
-
-class DispositivoMovil(models.Model):
-    """
-    Dispositivos móviles registrados para notificaciones push
-    """
-    usuario = models.ForeignKey(Usuario, on_delete=models.CASCADE, db_column='codusuario')
-    token_fcm = models.TextField(unique=True)  # Token de Firebase Cloud Messaging
-    plataforma = models.CharField(max_length=20, choices=[('android', 'Android'), ('ios', 'iOS')])
-    modelo_dispositivo = models.CharField(max_length=100, blank=True, null=True)
-    version_app = models.CharField(max_length=20, blank=True, null=True)
-    activo = models.BooleanField(default=True)
-    fecha_registro = models.DateTimeField(auto_now_add=True)
-    ultima_actividad = models.DateTimeField(auto_now=True)
-
-    class Meta:
-        db_table = 'dispositivomovil'
-        verbose_name = 'Dispositivo Móvil'
-        verbose_name_plural = 'Dispositivos Móviles'
-
-    def __str__(self):
-        return f"{self.usuario.nombre} - {self.plataforma} - {self.modelo_dispositivo}"
-
-
-class HistorialNotificacion(models.Model):
-    """
-    Registro de notificaciones enviadas
-    """
-    ESTADOS = [
-        ('pendiente', 'Pendiente'),
-        ('enviado', 'Enviado'),
-        ('entregado', 'Entregado'),
-        ('leido', 'Leído'),
-        ('error', 'Error'),
-    ]
-
-    usuario = models.ForeignKey(Usuario, on_delete=models.CASCADE, db_column='codusuario')
-    tipo_notificacion = models.ForeignKey(TipoNotificacion, on_delete=models.CASCADE, db_column='idtiponotificacion')
-    canal_notificacion = models.ForeignKey(CanalNotificacion, on_delete=models.CASCADE, db_column='idcanalnotificacion')
-    dispositivo_movil = models.ForeignKey(DispositivoMovil, on_delete=models.SET_NULL, null=True, blank=True, db_column='iddispositivomovil')
-
-    titulo = models.CharField(max_length=200)
-    mensaje = models.TextField()
-    datos_adicionales = models.JSONField(blank=True, null=True)  # Para metadatos adicionales
-
-    estado = models.CharField(max_length=20, choices=ESTADOS, default='pendiente')
-    fecha_creacion = models.DateTimeField(auto_now_add=True)
-    fecha_envio = models.DateTimeField(null=True, blank=True)
-    fecha_entrega = models.DateTimeField(null=True, blank=True)
-    fecha_lectura = models.DateTimeField(null=True, blank=True)
-
-    error_mensaje = models.TextField(blank=True, null=True)
-    intentos = models.IntegerField(default=0)
-
-    class Meta:
-        db_table = 'historialnotificacion'
-        verbose_name = 'Historial de Notificación'
-        verbose_name_plural = 'Historial de Notificaciones'
-        ordering = ['-fecha_creacion']
-
-    def __str__(self):
-        return f"{self.usuario.nombre} - {self.titulo} - {self.estado}"
-
-
-class PlantillaNotificacion(models.Model):
-    """
-    Plantillas para diferentes tipos de notificaciones
-    """
-    tipo_notificacion = models.ForeignKey(TipoNotificacion, on_delete=models.CASCADE, db_column='idtiponotificacion')
-    canal_notificacion = models.ForeignKey(CanalNotificacion, on_delete=models.CASCADE, db_column='idcanalnotificacion')
-
-    nombre = models.CharField(max_length=100)
-    asunto_template = models.CharField(max_length=200, blank=True, null=True)  # Para emails
-    titulo_template = models.CharField(max_length=200)
-    mensaje_template = models.TextField()
-
-    # Variables disponibles para reemplazar en las plantillas
-    variables_disponibles = models.JSONField(default=list, help_text="Lista de variables disponibles como {nombre}, {fecha}, etc.")
-
-    activo = models.BooleanField(default=True)
-    fecha_creacion = models.DateTimeField(auto_now_add=True)
-    fecha_actualizacion = models.DateTimeField(auto_now=True)
-
-    class Meta:
-        db_table = 'plantillanotificacion'
-        unique_together = ['tipo_notificacion', 'canal_notificacion']
-        verbose_name = 'Plantilla de Notificación'
-        verbose_name_plural = 'Plantillas de Notificación'
-
-    def __str__(self):
-        return f"{self.nombre} - {self.tipo_notificacion.nombre} - {self.canal_notificacion.nombre}"
+        return f"{self.usuario.nombre} - {self.accion} - {self.tabla_afectada} - {self.timestamp}"
