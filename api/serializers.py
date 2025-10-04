@@ -465,7 +465,7 @@ def crear_registro_bitacora(accion, usuario=None, ip_address='127.0.0.1', descri
     return Bitacora.objects.create(
         accion=accion,
         descripcion=descripcion,
-        usuario=usuario,
+        codusuario=usuario.codigo if usuario else None,
         ip_address=ip_address,
         modelo_afectado=modelo_afectado,
         objeto_id=objeto_id,

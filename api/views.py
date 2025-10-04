@@ -237,7 +237,7 @@ Si necesitas cancelar o reprogramar tu cita, ponte en contacto con nosotros.
             Bitacora.objects.create(
                 accion='cancelar_cita',
                 descripcion=f'Cita cancelada: {consulta_info}',
-                usuario=usuario,
+                codusuario=usuario.codigo if usuario else None,
                 ip_address=get_client_ip(request),
                 user_agent=request.META.get('HTTP_USER_AGENT', ''),
                 modelo_afectado='Consulta',
@@ -293,7 +293,7 @@ Si necesitas cancelar o reprogramar tu cita, ponte en contacto con nosotros.
             Bitacora.objects.create(
                 accion='limpiar_citas_vencidas',
                 descripcion=f'Eliminadas {cantidad} citas vencidas',
-                usuario=usuario,
+                codusuario=usuario.codigo if usuario else None,
                 ip_address=get_client_ip(request),
                 user_agent=request.META.get('HTTP_USER_AGENT', ''),
                 modelo_afectado='Consulta',
