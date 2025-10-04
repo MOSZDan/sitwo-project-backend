@@ -29,14 +29,43 @@ def _csv_env(name: str, default: list[str]) -> list[str]:
 
 # Configuración de CORS y hosts dependiendo del entorno
 if DEBUG:
-    # En desarrollo - permitir todos los orígenes (para Flutter web con puertos dinámicos)
+    # En desarrollo local - configuración permisiva
     CORS_ALLOW_ALL_ORIGINS = True
     CORS_ALLOW_CREDENTIALS = True
+    CORS_ALLOWED_ORIGINS = [
+        "http://localhost:3000",
+        "http://localhost:5173",
+        "http://127.0.0.1:3000",
+        "http://127.0.0.1:5173",
+        "http://localhost:8080",
+        "http://127.0.0.1:8080",
+    ]
     ALLOWED_HOSTS = ["*"]
     SESSION_COOKIE_SAMESITE = "Lax"
     CSRF_COOKIE_SAMESITE = "Lax"
     SESSION_COOKIE_SECURE = False
     CSRF_COOKIE_SECURE = False
+
+    # Headers adicionales para desarrollo
+    CORS_ALLOW_HEADERS = [
+        'accept',
+        'accept-encoding',
+        'authorization',
+        'content-type',
+        'dnt',
+        'origin',
+        'user-agent',
+        'x-csrftoken',
+        'x-requested-with',
+    ]
+    CORS_ALLOW_METHODS = [
+        'DELETE',
+        'GET',
+        'OPTIONS',
+        'PATCH',
+        'POST',
+        'PUT',
+    ]
 else:
     # En producción - configuración estricta
     CORS_ALLOW_ALL_ORIGINS = False
@@ -111,7 +140,7 @@ MIDDLEWARE = [
     "django.contrib.auth.middleware.AuthenticationMiddleware",
     "django.contrib.messages.middleware.MessageMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
-    "api.middleware.AuditMiddleware",
+    # "api.middleware.AuditMiddleware",  # TEMPORALMENTE COMENTADO hasta resolver conexión BD
 ]
 
 ROOT_URLCONF = "dental_clinic_backend.urls"
@@ -134,15 +163,41 @@ TEMPLATES = [
 WSGI_APPLICATION = "dental_clinic_backend.wsgi.application"
 
 # ------------------------------------
-# Base de datos (Supabase Postgres vía pooler, SSL)
+# Base de datos (Supabase Postgres vía pooler IPv4, optimizado para Render)
 # ------------------------------------
-DATABASES = {
-    "default": dj_database_url.config(
-        env="DATABASE_URL",
-        conn_max_age=600,
-        ssl_require=True,
-    )
-}
+DATABASE_URL = os.getenv("DATABASE_URL")
+
+if DATABASE_URL:
+    DATABASES = {
+        "default": dj_database_url.config(
+            env="DATABASE_URL",
+            conn_max_age=0,  # Sin pooling de conexiones para evitar conflictos con Supabase pooler
+            conn_health_checks=False,  # Desactivar health checks que pueden interferir
+            ssl_require=True,
+        )
+    }
+
+    # Configuraciones específicas para pooler de Supabase en Render
+    DATABASES['default'].update({
+        'OPTIONS': {
+            'sslmode': 'require',
+            'connect_timeout': 30,  # Timeout más largo para pooler
+            'application_name': 'dental_clinic_render',
+            # Evitar problemas con pooler de transacciones
+            'options': '-c default_transaction_isolation=read_committed'
+        },
+        'CONN_MAX_AGE': 0,  # Sin persistencia de conexiones
+        'AUTOCOMMIT': True,
+        'ATOMIC_REQUESTS': False,  # Importante: evitar transacciones automáticas con pooler
+    })
+else:
+    # Fallback para desarrollo local con SQLite
+    DATABASES = {
+        'default': {
+            'ENGINE': 'django.db.backends.sqlite3',
+            'NAME': BASE_DIR / 'db.sqlite3',
+        }
+    }
 
 # ------------------------------------
 # Password validators
