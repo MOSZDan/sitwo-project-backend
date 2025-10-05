@@ -172,25 +172,23 @@ if DATABASE_URL:
     DATABASES = {
         "default": dj_database_url.config(
             env="DATABASE_URL",
-            conn_max_age=0,
+            conn_max_age=0,  # Cerrar conexiones inmediatamente
             conn_health_checks=False,
             ssl_require=False,  # Cambiar a False y manejar SSL en OPTIONS
         )
     }
 
-    # Configuración específica para PostgreSQL con encoding UTF-8
-    # Usar sslmode=require en lugar de ssl_require para mejor compatibilidad
+    # Configuración específica para PostgreSQL con manejo optimizado de conexiones
     DATABASES['default'].update({
-        'CONN_MAX_AGE': 0,
+        'CONN_MAX_AGE': 0,  # Cerrar conexiones inmediatamente después de cada request
+        'CONN_HEALTH_CHECKS': False,
         'AUTOCOMMIT': True,
         'ATOMIC_REQUESTS': False,
         'OPTIONS': {
             'sslmode': 'require',
-            'connect_timeout': 30,
-            'keepalives': 1,
-            'keepalives_idle': 30,
-            'keepalives_interval': 10,
-            'keepalives_count': 5,
+            'connect_timeout': 10,  # Reducir timeout de conexión
+            'keepalives': 0,  # Deshabilitar keepalives para cerrar conexiones
+            'application_name': 'dental_clinic_render',
         },
     })
 
