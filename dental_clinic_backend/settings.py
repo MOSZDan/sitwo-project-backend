@@ -5,7 +5,6 @@ Django settings for dental_clinic_backend project.
 from pathlib import Path
 import os
 
-from django.template.context_processors import media
 from dotenv import load_dotenv
 import dj_database_url
 
@@ -125,7 +124,6 @@ INSTALLED_APPS = [
     'django_filters',
     "rest_framework.authtoken",
     "api",
-    "rest_framework.authtoken",
     "rest_framework_simplejwt",
     "whitenoise.runserver_nostatic",
 ]
