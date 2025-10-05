@@ -99,94 +99,72 @@ def auth_register(request):
         with transaction.atomic():
             # 1) auth_user: email único
             try:
-                dj_user = User.objects.create_user(username=email, email=email, password=password)
-            except IntegrityError:
-                return Response({"detail": "Ya existe un usuario con ese email."}, status=status.HTTP_409_CONFLICT)
+                existing_user = User.objects.get(username=email)
+                return Response(
+                    {"detail": "Ya existe un usuario con este email"},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+            except User.DoesNotExist:
+                pass  # Correcto, el usuario no existe
 
-            # Nombres (hasta 150 chars)
-            update_fields = []
-            if nombre:
-                dj_user.first_name = nombre[:150]
-                update_fields.append("first_name")
-            if apellido:
-                dj_user.last_name = apellido[:150]
-                update_fields.append("last_name")
-            if update_fields:
-                dj_user.save(update_fields=update_fields)
-
-            # 2) 'usuario' (dominio)
-            usuario, created = Usuario.objects.get_or_create(
-                correoelectronico=email,
-                defaults={
-                    "nombre": nombre or email.split("@")[0],
-                    "apellido": apellido or "",
-                    "telefono": telefono,
-                    "sexo": sexo,
-                    "idtipousuario_id": idtu,
-                },
+            # Crear usuario Django
+            user = User.objects.create_user(
+                username=email,
+                email=email,
+                password=password,
+                first_name=nombre,
+                last_name=apellido,
             )
-            if not created:
-                changed = False
-                if usuario.idtipousuario_id != idtu:
-                    usuario.idtipousuario_id = idtu
-                    changed = True
-                if nombre and usuario.nombre != nombre:
-                    usuario.nombre = nombre
-                    changed = True
-                if apellido and usuario.apellido != apellido:
-                    usuario.apellido = apellido
-                    changed = True
-                if telefono is not None and usuario.telefono != telefono:
-                    usuario.telefono = telefono
-                    changed = True
-                if sexo is not None and usuario.sexo != sexo:
-                    usuario.sexo = sexo
-                    changed = True
-                if changed:
-                    usuario.save()
 
-            # 3) Subtipo 1-1
+            # 2) Fila en 'usuario'
+            try:
+                usuario = Usuario.objects.get(correoelectronico=email)
+                # Actualizar datos
+                usuario.nombre = nombre
+                usuario.apellido = apellido
+                usuario.telefono = telefono
+                usuario.sexo = sexo
+                usuario.idtipousuario_id = idtu
+                usuario.save()
+            except Usuario.DoesNotExist:
+                # Crear nuevo
+                usuario = Usuario.objects.create(
+                    nombre=nombre,
+                    apellido=apellido,
+                    correoelectronico=email,
+                    telefono=telefono,
+                    sexo=sexo,
+                    idtipousuario_id=idtu,
+                )
+
+            # 3) Crear subtipo
             if rol_subtipo == "paciente":
                 try:
-                    Paciente.objects.update_or_create(
+                    paciente = Paciente.objects.get(codusuario=usuario)
+                    # Actualizar
+                    paciente.carnetidentidad = carnetidentidad
+                    paciente.fechanacimiento = fechanacimiento
+                    paciente.direccion = direccion
+                    paciente.save()
+                except Paciente.DoesNotExist:
+                    # Crear
+                    Paciente.objects.create(
                         codusuario=usuario,
-                        defaults={
-                            "carnetidentidad": carnetidentidad,
-                            "fechanacimiento": fechanacimiento,
-                            "direccion": direccion,
-                        },
+                        carnetidentidad=carnetidentidad,
+                        fechanacimiento=fechanacimiento,
+                        direccion=direccion,
                     )
-                except IntegrityError:
-                    return Response({"carnetidentidad": "El carnet ya existe."}, status=status.HTTP_409_CONFLICT)
-            elif rol_subtipo == "odontologo":
-                Odontologo.objects.get_or_create(codusuario=usuario)
-            elif rol_subtipo == "recepcionista":
-                Recepcionista.objects.get_or_create(codusuario=usuario)
-            elif rol_subtipo == "administrador":
-                pass
-            else:
-                Paciente.objects.get_or_create(codusuario=usuario)
 
-    except DatabaseError as e:
-        return Response({"detail": "Error al registrar.", "error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
+        return Response(
+            {"detail": "Usuario registrado correctamente"},
+            status=status.HTTP_201_CREATED
+        )
 
-    # Respuesta compatible con tu FE
-    return Response(
-        {
-            "ok": True,
-            "message": "Usuario registrado.",
-            "user": {
-                "id": dj_user.id,
-                "email": email,
-                "first_name": dj_user.first_name,
-                "last_name": dj_user.last_name,
-            },
-            "usuario_codigo": usuario.codigo,
-            "subtipo": rol_subtipo,
-            "idtipousuario": idtu,
-        },
-        status=status.HTTP_201_CREATED,
-    )
+    except Exception as e:
+        return Response(
+            {"detail": f"Error al registrar usuario: {str(e)}"},
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR
+        )
 
 
 # ============================
@@ -292,7 +270,7 @@ def auth_login(request):
         Bitacora.objects.create(
             accion='login',
             descripcion=f'Login exitoso - {usuario.nombre} {usuario.apellido}',
-            usuario=usuario,
+            codusuario=usuario.codigo,
             ip_address=_client_ip(request),
             user_agent=request.META.get('HTTP_USER_AGENT', ''),
             datos_adicionales={'email': email, 'metodo': 'manual_login_view'}
@@ -303,14 +281,17 @@ def auth_login(request):
 
     # Determinar subtipo
     subtipo = "usuario"
-    if hasattr(usuario, "paciente"):
-        subtipo = "paciente"
-    elif hasattr(usuario, "odontologo"):
-        subtipo = "odontologo"
-    elif hasattr(usuario, "recepcionista"):
-        subtipo = "recepcionista"
-    elif usuario.idtipousuario_id == 1:
-        subtipo = "administrador"
+    try:
+        if hasattr(usuario, "paciente"):
+            subtipo = "paciente"
+        elif hasattr(usuario, "odontologo"):
+            subtipo = "odontologo"
+        elif hasattr(usuario, "recepcionista"):
+            subtipo = "recepcionista"
+        elif usuario.idtipousuario_id == 1:
+            subtipo = "administrador"
+    except Exception:
+        pass  # Mantener subtipo por defecto
 
     return Response({
         "ok": True,
@@ -337,6 +318,7 @@ def auth_login(request):
 
 
 @api_view(["POST"])
+@permission_classes([IsAuthenticated])
 def auth_logout(request):
     """Cerrar sesión - elimina el token del usuario"""
     try:
@@ -348,33 +330,34 @@ def auth_logout(request):
 
 
 @api_view(["GET"])
+@permission_classes([IsAuthenticated])
 def auth_user_info(request):
-    """Información del usuario autenticado actual"""
-    if not request.user.is_authenticated:
-        return Response({"detail": "No autenticado"}, status=status.HTTP_401_UNAUTHORIZED)
-
+    """Información del usuario autenticado"""
     try:
-        usuario = Usuario.objects.get(correoelectronico=request.user.email)
+        user = request.user
+        usuario = Usuario.objects.get(correoelectronico=user.email)
+
         # Determinar subtipo
         subtipo = "usuario"
-        if hasattr(usuario, "paciente"):
-            subtipo = "paciente"
-        elif hasattr(usuario, "odontologo"):
-            subtipo = "odontologo"
-        elif hasattr(usuario, "recepcionista"):
-            subtipo = "recepcionista"
-        elif usuario.idtipousuario_id == 1:
-            subtipo = "administrador"
-    except Usuario.DoesNotExist:
-        return Response({"detail": "Usuario no encontrado"}, status=status.HTTP_404_NOT_FOUND)
+        try:
+            if hasattr(usuario, "paciente"):
+                subtipo = "paciente"
+            elif hasattr(usuario, "odontologo"):
+                subtipo = "odontologo"
+            elif hasattr(usuario, "recepcionista"):
+                subtipo = "recepcionista"
+            elif usuario.idtipousuario_id == 1:
+                subtipo = "administrador"
+        except Exception:
+            pass
 
-    return Response(
-        {
+        return Response({
             "user": {
-                "id": request.user.id,
-                "email": request.user.email,
-                "first_name": request.user.first_name,
-                "last_name": request.user.last_name,
+                "id": user.id,
+                "email": user.email,
+                "first_name": user.first_name,
+                "last_name": user.last_name,
+                "is_active": user.is_active,
             },
             "usuario": {
                 "codigo": usuario.codigo,
@@ -384,234 +367,203 @@ def auth_user_info(request):
                 "sexo": usuario.sexo,
                 "subtipo": subtipo,
                 "idtipousuario": usuario.idtipousuario_id,
-            },
-        },
-        status=status.HTTP_200_OK,
-    )
+                "recibir_notificaciones": usuario.recibir_notificaciones,
+            }
+        })
+    except Usuario.DoesNotExist:
+        return Response({"detail": "Usuario no encontrado en el sistema"}, status=status.HTTP_404_NOT_FOUND)
+    except Exception as e:
+        return Response({"detail": f"Error obteniendo información del usuario: {str(e)}"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
 # ============================
-# Recuperación de contraseña
+# Usuario Me (legacy)
+# ============================
+class UsuarioMeView(APIView):
+    """Vista para obtener/actualizar datos del usuario actual"""
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        """GET /api/usuario/me - Obtener datos del usuario"""
+        try:
+            user = request.user
+            usuario = Usuario.objects.get(correoelectronico=user.email)
+
+            # Serializar
+            serializer = UsuarioMeSerializer(usuario)
+            return Response(serializer.data, status=status.HTTP_200_OK)
+
+        except Usuario.DoesNotExist:
+            return Response(
+                {"detail": "Usuario no encontrado en sistema local"},
+                status=status.HTTP_404_NOT_FOUND
+            )
+        except Exception as e:
+            return Response(
+                {"detail": f"Error obteniendo usuario: {str(e)}"},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+
+    def patch(self, request):
+        """PATCH /api/usuario/me - Actualizar datos parciales"""
+        try:
+            user = request.user
+            usuario = Usuario.objects.get(correoelectronico=user.email)
+
+            # Serializar y validar
+            serializer = UsuarioMeSerializer(usuario, data=request.data, partial=True)
+            if serializer.is_valid():
+                serializer.save()
+                return Response(serializer.data, status=status.HTTP_200_OK)
+            else:
+                return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+        except Usuario.DoesNotExist:
+            return Response(
+                {"detail": "Usuario no encontrado"},
+                status=status.HTTP_404_NOT_FOUND
+            )
+        except Exception as e:
+            return Response(
+                {"detail": f"Error actualizando usuario: {str(e)}"},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+
+
+# ============================
+# Reset de contraseña
 # ============================
 @api_view(["POST"])
-@authentication_classes([])  # público
-@permission_classes([AllowAny])  # público
+@permission_classes([AllowAny])
 def password_reset_request(request):
-    """
-    Paso 1: Usuario envía su email -> se manda link de reset (HTML + texto).
-    Respuesta genérica anti-enumeración SIEMPRE 200.
-    """
-    email = (request.data.get("email") or "").strip().lower()
-    generic_msg = "Si el correo existe, enviamos un enlace para restablecer tu contraseña."
-
+    """Solicitar reset de contraseña por email"""
+    email = request.data.get("email", "").strip().lower()
     if not email:
         return Response({"detail": "Email es requerido"}, status=status.HTTP_400_BAD_REQUEST)
 
-    user = User.objects.filter(email__iexact=email).first()
-    if user:
-        # Generar token y uid
-        uid = urlsafe_base64_encode(force_bytes(user.pk))
-        token = default_token_generator.make_token(user)
-        reset_url = f"{settings.FRONTEND_URL.rstrip('/')}/reset-password?uid={uid}&token={token}"
+    try:
+        user = User.objects.get(email=email)
 
-        subject = "Recuperación de contraseña - Clínica Dental"
-        text_content = f"Usa este link para cambiar tu contraseña: {reset_url}"
+        # Generar token
+        token = default_token_generator.make_token(user)
+        uid = urlsafe_base64_encode(force_bytes(user.pk))
+
+        # URL del frontend
+        frontend_url = getattr(settings, "FRONTEND_URL", "http://localhost:3000")
+        reset_url = f"{frontend_url}/reset-password/{uid}/{token}/"
+
+        # Enviar email
+        subject = "Restablecer contraseña - Clínica Dental"
         html_content = f"""
-        <p>Hola{(' ' + (user.first_name or '')) if getattr(user, 'first_name', '') else ''},</p>
-        <p>Has solicitado recuperar tu contraseña. Haz clic en el siguiente enlace para continuar:</p>
-        <p><a href="{reset_url}">{reset_url}</a></p>
-        <p>Si no solicitaste este cambio, ignora este correo.</p>
+        <h2>Restablecer contraseña</h2>
+        <p>Has solicitado restablecer tu contraseña.</p>
+        <p>Haz clic en el siguiente enlace para continuar:</p>
+        <a href="{reset_url}">Restablecer contraseña</a>
+        <p>Si no solicitaste este cambio, puedes ignorar este email.</p>
         """
+
         try:
             msg = EmailMultiAlternatives(
                 subject=subject,
-                body=text_content,
-                from_email=settings.DEFAULT_FROM_EMAIL,
-                to=[user.email],
+                body="Restablecer contraseña",
+                from_email=getattr(settings, "DEFAULT_FROM_EMAIL", "no-reply@clinica.local"),
+                to=[email]
             )
             msg.attach_alternative(html_content, "text/html")
-            # Evitar 500 si email backend no está configurado:
-            msg.send(fail_silently=True)
-        except Exception:
-            pass
+            msg.send()
+        except Exception as e:
+            print(f"Error enviando email: {e}")
+            # No fallar si el email no se puede enviar
 
-    # Respuesta uniforme (exista o no el email)
-    return Response({"ok": True, "message": generic_msg}, status=status.HTTP_200_OK)
+        return Response({"detail": "Si el email existe, recibirás instrucciones para restablecer tu contraseña"})
+
+    except User.DoesNotExist:
+        # No revelar si el email existe o no
+        return Response({"detail": "Si el email existe, recibirás instrucciones para restablecer tu contraseña"})
+    except Exception as e:
+        return Response({"detail": f"Error procesando solicitud: {str(e)}"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
 @api_view(["POST"])
-@authentication_classes([])  # público
-@permission_classes([AllowAny])  # público
+@permission_classes([AllowAny])
 def password_reset_confirm(request):
-    """
-    Paso 2: Usuario envía uid + token + new_password
-    """
+    """Confirmar reset de contraseña"""
     uid = request.data.get("uid")
     token = request.data.get("token")
     new_password = request.data.get("new_password")
 
-    if not (uid and token and new_password):
-        return Response({"detail": "Faltan datos"}, status=status.HTTP_400_BAD_REQUEST)
+    if not all([uid, token, new_password]):
+        return Response({"detail": "Todos los campos son requeridos"}, status=status.HTTP_400_BAD_REQUEST)
 
     try:
+        # Decodificar UID
         user_id = force_str(urlsafe_base64_decode(uid))
         user = User.objects.get(pk=user_id)
-    except (User.DoesNotExist, ValueError, TypeError):
-        return Response({"detail": "Usuario inválido"}, status=status.HTTP_400_BAD_REQUEST)
 
-    if not default_token_generator.check_token(user, token):
-        return Response({"detail": "Token inválido o expirado"}, status=status.HTTP_400_BAD_REQUEST)
+        # Verificar token
+        if not default_token_generator.check_token(user, token):
+            return Response({"detail": "Token inválido o expirado"}, status=status.HTTP_400_BAD_REQUEST)
 
-    user.set_password(new_password)
-    user.save()
+        # Cambiar contraseña
+        user.set_password(new_password)
+        user.save()
 
-    return Response({"ok": True, "message": "Contraseña actualizada correctamente"}, status=status.HTTP_200_OK)
+        return Response({"detail": "Contraseña restablecida correctamente"})
+
+    except (TypeError, ValueError, OverflowError, User.DoesNotExist):
+        return Response({"detail": "Token inválido"}, status=status.HTTP_400_BAD_REQUEST)
+    except Exception as e:
+        return Response({"detail": f"Error restableciendo contraseña: {str(e)}"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
 # ============================
-# Preferencias de Usuario
+# Configuraciones de usuario
 # ============================
-@api_view(["PATCH"])
-def auth_user_settings_update(request):
-    """
-    Actualiza las preferencias del usuario autenticado.
-    Por ahora, solo para activar/desactivar notificaciones.
-    """
-    if not request.user.is_authenticated:
-        return Response({"detail": "No autenticado"}, status=status.HTTP_401_UNAUTHORIZED)
-
-    try:
-        usuario_instance = Usuario.objects.get(correoelectronico=request.user.email)
-    except Usuario.DoesNotExist:
-        return Response({"detail": "Usuario no encontrado"}, status=status.HTTP_404_NOT_FOUND)
-
-    serializer = UserNotificationSettingsSerializer(instance=usuario_instance, data=request.data, partial=True)
-    if serializer.is_valid():
-        serializer.save()
-        return Response({
-            "ok": True,
-            "message": "Preferencias actualizadas.",
-            "recibir_notificaciones": serializer.data['recibir_notificaciones']
-            }, status=status.HTTP_200_OK)
-
-    return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-
-
 @api_view(["GET", "PATCH"])
-def notification_preferences(request):
-    """
-    GET: Obtiene las preferencias de notificación del usuario
-    PATCH: Actualiza las preferencias de notificación del usuario
-    """
-    if not request.user.is_authenticated:
-        return Response({"detail": "No autenticado"}, status=status.HTTP_401_UNAUTHORIZED)
-
+@permission_classes([IsAuthenticated])
+def auth_user_settings_update(request):
+    """Obtener/actualizar configuraciones del usuario"""
     try:
-        usuario_instance = Usuario.objects.get(correoelectronico=request.user.email)
+        user = request.user
+        usuario = Usuario.objects.get(correoelectronico=user.email)
+
+        if request.method == "GET":
+            serializer = UserNotificationSettingsSerializer(usuario)
+            return Response(serializer.data)
+
+        elif request.method == "PATCH":
+            serializer = UserNotificationSettingsSerializer(usuario, data=request.data, partial=True)
+            if serializer.is_valid():
+                serializer.save()
+                return Response(serializer.data)
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
     except Usuario.DoesNotExist:
         return Response({"detail": "Usuario no encontrado"}, status=status.HTTP_404_NOT_FOUND)
-
-    if request.method == "GET":
-        data = {
-            "notificaciones_email": usuario_instance.notificaciones_email,
-            "notificaciones_push": usuario_instance.notificaciones_push,
-        }
-        return Response(data, status=status.HTTP_200_OK)
-
-    elif request.method == "PATCH":
-        serializer = NotificationPreferencesSerializer(instance=usuario_instance, data=request.data, partial=True)
-        if serializer.is_valid():
-            serializer.save()
-            return Response({
-                "ok": True,
-                "message": "Preferencias de notificación actualizadas.",
-                "notificaciones_email": serializer.data['notificaciones_email'],
-                "notificaciones_push": serializer.data['notificaciones_push']
-            }, status=status.HTTP_200_OK)
-
-        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+    except Exception as e:
+        return Response({"detail": f"Error: {str(e)}"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
-# ============================
-# Perfil de Usuario (GET/PATCH)
-# ============================
-class UsuarioMeView(APIView):
-    """
-    GET   /api/usuario/me  -> devuelve la fila en `usuario` del usuario autenticado
-    PATCH /api/usuario/me  -> actualiza campos permitidos; sincroniza auth_user.email si cambia `correoelectronico`
-    Vincula por: auth_user.email == usuario.correoelectronico (case-insensitive)
-    """
-    permission_classes = [IsAuthenticated]
+@api_view(["GET", "POST"])
+@permission_classes([IsAuthenticated])
+def notification_preferences(request):
+    """Gestionar preferencias de notificaciones"""
+    try:
+        user = request.user
+        usuario = Usuario.objects.get(correoelectronico=user.email)
 
-    def _resolve_email(self, request) -> str:
-        email = (getattr(request.user, "email", "") or "").strip()
-        if not email:
-            username = (getattr(request.user, "username", "") or "").strip()
-            if "@" in username:
-                email = username
-        return email
+        if request.method == "GET":
+            serializer = NotificationPreferencesSerializer(usuario)
+            return Response(serializer.data)
 
-    def _get_row(self, request) -> Usuario:
-        email = self._resolve_email(request)
-        if not email:
-            raise ObjectDoesNotExist("El usuario autenticado no tiene email.")
-        try:
-            return Usuario.objects.get(correoelectronico__iexact=email)
-        except MultipleObjectsReturned:
-            return Usuario.objects.filter(correoelectronico__iexact=email).order_by("codigo").first()
+        elif request.method == "POST":
+            serializer = NotificationPreferencesSerializer(usuario, data=request.data, partial=True)
+            if serializer.is_valid():
+                serializer.save()
+                return Response({"detail": "Preferencias actualizadas correctamente"})
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
-    def _serialize(self, u: Usuario) -> dict:
-        return {
-            "codigo": u.codigo,
-            "nombre": u.nombre,
-            "apellido": u.apellido,
-            "correoelectronico": u.correoelectronico,
-            "sexo": u.sexo,
-            "telefono": u.telefono,
-            "idtipousuario": u.idtipousuario_id,
-            "recibir_notificaciones": u.recibir_notificaciones,
-        }
-
-    def get(self, request):
-        try:
-            u = self._get_row(request)
-        except ObjectDoesNotExist:
-            return Response({"detail": "No se encontró tu fila en 'usuario' (correo no coincide)."}, status=404)
-        return Response(self._serialize(u))
-
-    @transaction.atomic
-    def patch(self, request):
-        try:
-            u = self._get_row(request)
-        except ObjectDoesNotExist:
-            return Response({"detail": "No se encontró tu fila en 'usuario' (correo no coincide)."}, status=404)
-
-        ser = UsuarioMeSerializer(data=request.data, partial=True)
-        ser.is_valid(raise_exception=True)
-        data = ser.validated_data
-
-        allowed = {"nombre", "apellido", "correoelectronico", "sexo", "telefono", "recibir_notificaciones"}
-
-        # Evitar duplicar correos (la BD también lo asegura con unique=True)
-        nuevo_correo = data.get("correoelectronico")
-        if nuevo_correo and Usuario.objects.exclude(pk=u.pk).filter(correoelectronico__iexact=nuevo_correo).exists():
-            return Response({"detail": "Ese correo ya está registrado."}, status=status.HTTP_400_BAD_REQUEST)
-
-        # Asignar cambios permitidos
-        for k, v in data.items():
-            if k in allowed:
-                setattr(u, k, v)
-        u.save()
-
-        # Si cambió correo, sincronizar auth_user
-        if nuevo_correo:
-            auth_user = User.objects.get(pk=request.user.pk)
-            auth_user.email = nuevo_correo
-            try:
-                if getattr(auth_user, "username", None) and "@" in (auth_user.username or ""):
-                    auth_user.username = nuevo_correo
-                auth_user.save(update_fields=["email", "username"])
-            except Exception:
-                auth_user.save(update_fields=["email"])
-
-        return Response(self._serialize(u), status=200)
+    except Usuario.DoesNotExist:
+        return Response({"detail": "Usuario no encontrado"}, status=status.HTTP_404_NOT_FOUND)
+    except Exception as e:
+        return Response({"detail": f"Error: {str(e)}"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
