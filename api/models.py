@@ -333,8 +333,8 @@ class Bitacora(models.Model):
     id = models.AutoField(primary_key=True)
     usuario = models.ForeignKey(Usuario, on_delete=models.CASCADE, db_column='codusuario')
     accion = models.CharField(max_length=100)
-    tabla_afectada = models.CharField(max_length=100)
-    registro_id = models.IntegerField(null=True, blank=True)  # Agregado null=True, blank=True
+    tabla_afectada = models.CharField(max_length=100, null=True, blank=True)  # Agregado null=True, blank=True
+    registro_id = models.IntegerField(null=True, blank=True)  # Ya corregido antes
     valores_anteriores = models.JSONField(null=True, blank=True)
     valores_nuevos = models.JSONField(null=True, blank=True)
     ip_address = models.GenericIPAddressField()

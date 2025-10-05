@@ -217,9 +217,9 @@ def auth_login(request):
         # Log de login (tolerante a fallos: jamás rompe el login)
         try:
             Bitacora.objects.create(
+                usuario=usuario,  # Cambiar de codusuario a usuario
                 accion='login',
                 descripcion=f'Login exitoso - {usuario.nombre} {usuario.apellido}',
-                codusuario=usuario.codigo,
                 ip_address=_client_ip(request),
                 user_agent=request.META.get('HTTP_USER_AGENT', ''),
                 datos_adicionales={'email': email, 'metodo': 'manual_login_view'}
@@ -547,4 +547,3 @@ def notification_preferences(request):
         return Response({"detail": f"Error: {str(e)}"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
     finally:
         close_db_connection()
-
