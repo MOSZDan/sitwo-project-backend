@@ -331,7 +331,7 @@ class Vista(models.Model):
 # ============================================================================
 class Bitacora(models.Model):
     id = models.AutoField(primary_key=True)
-    usuario = models.ForeignKey(Usuario, on_delete=models.CASCADE, db_column='codusuario')
+    usuario = models.ForeignKey(Usuario, on_delete=models.SET_NULL, db_column='codusuario', null=True, blank=True)
     accion = models.CharField(max_length=100)
     tabla_afectada = models.CharField(max_length=100, null=True, blank=True)
     registro_id = models.IntegerField(null=True, blank=True)
@@ -347,4 +347,5 @@ class Bitacora(models.Model):
         verbose_name_plural = 'Bitácoras'
 
     def __str__(self):
-        return f"{self.usuario.nombre} - {self.accion} - {self.tabla_afectada} - {self.timestamp}"
+        usuario_nombre = self.usuario.nombre if self.usuario else "Sistema"
+        return f"{usuario_nombre} - {self.accion} - {self.tabla_afectada} - {self.timestamp}"
