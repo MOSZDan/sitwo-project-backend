@@ -306,24 +306,25 @@ class Tipopago(models.Model):
         db_table = 'tipopago'
 
 
-class Vista(models.Model):
-    """
-    Modelo para gestión de vistas/pantallas y permisos por roles
-    """
-    codigo = models.CharField(max_length=50, unique=True)
-    nombre = models.CharField(max_length=100)
-    ruta = models.CharField(max_length=200)
-    plataforma = models.CharField(max_length=50)  # web, mobile, etc.
-    descripcion = models.TextField(blank=True, null=True)
-    roles_permitidos = models.ManyToManyField(Tipodeusuario, blank=True)
-
-    class Meta:
-        db_table = 'vista'
-        verbose_name = 'Vista'
-        verbose_name_plural = 'Vistas'
-
-    def __str__(self):
-        return f"{self.nombre} ({self.codigo})"
+# TEMPORALMENTE COMENTADO - La tabla 'vista' no existe en la BD
+# class Vista(models.Model):
+#     """
+#     Modelo para gestión de vistas/pantallas y permisos por roles
+#     """
+#     codigo = models.CharField(max_length=50, unique=True)
+#     nombre = models.CharField(max_length=100)
+#     ruta = models.CharField(max_length=200)
+#     plataforma = models.CharField(max_length=50)  # web, mobile, etc.
+#     descripcion = models.TextField(blank=True, null=True)
+#     roles_permitidos = models.ManyToManyField(Tipodeusuario, blank=True)
+#
+#     class Meta:
+#         db_table = 'vista'
+#         verbose_name = 'Vista'
+#         verbose_name_plural = 'Vistas'
+#
+#     def __str__(self):
+#         return f"{self.nombre} ({self.codigo})"
 
 
 # ============================================================================
