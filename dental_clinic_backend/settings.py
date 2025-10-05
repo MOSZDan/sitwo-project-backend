@@ -38,7 +38,6 @@ INSTALLED_APPS = [
     'django_filters',
     "rest_framework.authtoken",
     "api",
-    "rest_framework_simplejwt",
     "whitenoise.runserver_nostatic",
 ]
 
