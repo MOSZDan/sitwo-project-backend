@@ -4,6 +4,8 @@ Django settings for dental_clinic_backend project.
 
 from pathlib import Path
 import os
+
+from django.template.context_processors import media
 from dotenv import load_dotenv
 import dj_database_url
 
@@ -123,8 +125,9 @@ INSTALLED_APPS = [
     'django_filters',
     "rest_framework.authtoken",
     "api",
-    #"rest_framework.authtoken",
-    # "rest_framework_simplejwt",
+    "rest_framework.authtoken",
+    "rest_framework_simplejwt",
+    "whitenoise.runserver_nostatic",
 ]
 
 # ------------------------------------
@@ -140,7 +143,8 @@ MIDDLEWARE = [
     "django.contrib.auth.middleware.AuthenticationMiddleware",
     "django.contrib.messages.middleware.MessageMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
-    "api.middleware.AuditMiddleware",  # TEMPORALMENTE COMENTADO hasta resolver conexión BD
+    "api.middleware.AuditMiddleware",
+    "whitenoise.middleware.WhiteNoiseMiddleware",
 ]
 
 ROOT_URLCONF = "dental_clinic_backend.urls"
@@ -212,7 +216,9 @@ USE_TZ = True
 # Archivos estáticos (WhiteNoise)
 # ------------------------------------
 STATIC_URL = "/static/"
-STATIC_ROOT = BASE_DIR / "staticfiles"
+STATIC_ROOT = os.path.join(BASE_DIR,'staticfiles')
+MEDIA_URLS = "/media/"
+MEDIA_ROOT = os.path.join(BASE_DIR, 'media')
 STATICFILES_STORAGE = "whitenoise.storage.CompressedManifestStaticFilesStorage"
 
 # ------------------------------------
