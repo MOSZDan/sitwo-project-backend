@@ -19,9 +19,31 @@ load_dotenv(BASE_DIR / ".env")
 # ------------------------------------
 SECRET_KEY = os.getenv("SECRET_KEY", "dev-only-not-secret")
 DEBUG = os.getenv("DEBUG", "False").lower() == "true"
+# ------------------------------------
+# Seguridad - Allowed Hosts / CORS / CSRF
+# ------------------------------------
+ALLOWED_HOSTS = [
+    "localhost",
+    "127.0.0.1",
+    "3.137.195.59",
+    "18.220.214.178",
+    ".amazonaws.com",
+    "ec2-18-220-214-178.us-east-2.compute.amazonaws.com",
+    "sitwo-project.onrender.com",
+]
 
-ALLOWED_HOSTS = ["localhost", "127.0.0.1", "3.137.195.59", ".amazonaws.com"]
+CORS_ALLOWED_ORIGINS = [
+    "https://sitwo-project.onrender.com",
+    "http://localhost:3000",
+    "http://127.0.0.1:3000",
+]
 
+CSRF_TRUSTED_ORIGINS = [
+    "https://sitwo-project.onrender.com",
+    "http://18.220.214.178",
+    "https://18.220.214.178",
+    "https://ec2-18-220-214-178.us-east-2.compute.amazonaws.com",
+]
 
 # ------------------------------------
 # Apps
