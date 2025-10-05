@@ -3,7 +3,6 @@ from .models import (
     Usuario, Paciente, Odontologo, Recepcionista,
     Horario, Tipodeconsulta, Estadodeconsulta, Consulta,
     Tipodeusuario,   # ← roles
-    Vista,           # ← NUEVO: para gestión de permisos
     Historialclinico,  # ← NUEVO: HCE
 )
 from rest_framework.validators import UniqueTogetherValidator
@@ -226,27 +225,6 @@ class UserNotificationSettingsSerializer(serializers.ModelSerializer):
     class Meta:
         model = Usuario
         fields = ['recibir_notificaciones']
-
-
-# --------- NUEVO: Vista (gestión de permisos por roles) ---------
-
-class VistaSerializer(serializers.ModelSerializer):
-    # trabajamos por ids de Tipodeusuario
-    roles_permitidos = serializers.PrimaryKeyRelatedField(
-        many=True, queryset=Tipodeusuario.objects.all(), required=False
-    )
-
-    class Meta:
-        model = Vista
-        fields = (
-            "id",
-            "codigo",
-            "nombre",
-            "ruta",
-            "plataforma",
-            "descripcion",
-            "roles_permitidos",
-        )
 
 
 # --------- PERFIL (GET/PATCH de la propia fila en `usuario`) ---------
