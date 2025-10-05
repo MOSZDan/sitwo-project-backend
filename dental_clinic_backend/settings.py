@@ -31,7 +31,9 @@ ALLOWED_HOSTS = [
     "ec2-18-220-214-178.us-east-2.compute.amazonaws.com",
     "sitwo-project.onrender.com",
     "127.0.0.1:5173",
-    "http://localhost:5173"
+    "http://localhost:5173",
+    "notificct.dpdns.org",
+    "balancearin-1841542738.us-east-2.elb.amazonaws.com"
 ]
 
 CORS_ALLOWED_ORIGINS = [
