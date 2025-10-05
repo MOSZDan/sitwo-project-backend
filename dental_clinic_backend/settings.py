@@ -163,101 +163,44 @@ TEMPLATES = [
 WSGI_APPLICATION = "dental_clinic_backend.wsgi.application"
 
 # ------------------------------------
-# Base de datos (Configuración simplificada para Render + Supabase)
+# Base de datos (Configuración corregida para Render + Supabase)
 # ------------------------------------
 DATABASE_URL = os.getenv("DATABASE_URL")
 
-# NUEVO ENFOQUE: Usar variables individuales como en el script que funciona
-# Leer variables de la misma forma que el script local exitoso
-DB_USER = os.getenv("user", "postgres.chcnkzxikvjyxvhrsezt")
-DB_PASSWORD = os.getenv("password", "yOsOYsUPABASE!")
-DB_HOST = os.getenv("host", "aws-1-us-east-2.pooler.supabase.com")
-DB_PORT = os.getenv("port", "5432")
-DB_NAME = os.getenv("dbname", "postgres")
-
-print(f"🔍 Variables de BD detectadas:")
-print(f"  - Usuario: {DB_USER}")
-print(f"  - Host: {DB_HOST}")
-print(f"  - Puerto: {DB_PORT}")
-print(f"  - Base: {DB_NAME}")
-print(f"  - DATABASE_URL existe: {'Sí' if DATABASE_URL else 'No'}")
-
-# Probar conexión directa como en el script que funciona
-def test_direct_connection():
-    """Test de conexión directa usando psycopg2 como en el script local"""
-    try:
-        import psycopg2
-        connection = psycopg2.connect(
-            user=DB_USER,
-            password=DB_PASSWORD,
-            host=DB_HOST,
-            port=DB_PORT,
-            dbname=DB_NAME
-        )
-        cursor = connection.cursor()
-        cursor.execute("SELECT NOW();")
-        result = cursor.fetchone()
-        cursor.close()
-        connection.close()
-        print(f"✅ Conexión directa exitosa! Timestamp: {result[0]}")
-        return True
-    except Exception as e:
-        print(f"❌ Error en conexión directa: {e}")
-        return False
-
-# Ejecutar test de conexión
-direct_connection_works = test_direct_connection()
-
-# Configurar DATABASES usando el método que funciona
-if direct_connection_works:
-    # Si la conexión directa funciona, configurar Django para usar estos parámetros
-    DATABASES = {
-        'default': {
-            'ENGINE': 'django.db.backends.postgresql',
-            'NAME': DB_NAME,
-            'USER': DB_USER,
-            'PASSWORD': DB_PASSWORD,
-            'HOST': DB_HOST,
-            'PORT': DB_PORT,
-            'CONN_MAX_AGE': 0,  # Cerrar conexiones inmediatamente
-            'CONN_HEALTH_CHECKS': False,
-            'OPTIONS': {
-                'sslmode': 'require',
-                'connect_timeout': 15,
-                'keepalives': 0,
-                'application_name': 'dental_clinic_render',
-            },
-        }
-    }
-    print("✅ Configurando Django con conexión directa que funciona")
-
-elif DATABASE_URL and "postgres" in DATABASE_URL:
-    # Fallback: usar DATABASE_URL si existe
+if DATABASE_URL:
+    # Configuración optimizada para Supabase Session Pooler en Render
     DATABASES = {
         "default": dj_database_url.config(
-            default=DATABASE_URL,
-            conn_max_age=0,
+            env="DATABASE_URL",
+            conn_max_age=0,  # Sin pool de conexiones persistentes
             conn_health_checks=False,
+            ssl_require=True,  # Cambiar a True para consistencia
         )
     }
+
+    # Configuración específica para PostgreSQL con Session Pooler de Supabase
     DATABASES['default'].update({
-        'CONN_MAX_AGE': 0,
+        'CONN_MAX_AGE': 0,  # Cerrar conexiones inmediatamente
         'CONN_HEALTH_CHECKS': False,
         'AUTOCOMMIT': True,
         'ATOMIC_REQUESTS': False,
         'OPTIONS': {
             'sslmode': 'require',
-            'connect_timeout': 15,
-            'keepalives': 0,
+            'connect_timeout': 30,  # Timeout más alto para Render
+            'keepalives_idle': 600,
+            'keepalives_interval': 30,
+            'keepalives_count': 3,
             'application_name': 'dental_clinic_render',
+            # Configuración específica para Session Pooler
+            'server_side_binding': False,
         },
     })
+
+    # Asegurar que el ENGINE sea correcto
     DATABASES['default']['ENGINE'] = 'django.db.backends.postgresql'
-    print("⚠️ Usando DATABASE_URL como fallback")
 
 else:
-    # Último fallback: SQLite
-    print("⚠️ Usando SQLite como último fallback")
+    # Fallback para desarrollo local con SQLite
     DATABASES = {
         'default': {
             'ENGINE': 'django.db.backends.sqlite3',
