@@ -30,14 +30,16 @@ ALLOWED_HOSTS = [
     ".amazonaws.com",
     "ec2-18-220-214-178.us-east-2.compute.amazonaws.com",
     "sitwo-project.onrender.com",
-    "127.0.0.1:5173"
+    "127.0.0.1:5173",
+    "http://localhost:5173"
 ]
 
 CORS_ALLOWED_ORIGINS = [
     "https://sitwo-project.onrender.com",
     "http://localhost:3000",
     "http://127.0.0.1:3000",
-    "http://127.0.0.1:5173"
+    "http://127.0.0.1:5173",
+    "http://localhost:5173"
 ]
 CORS_ALLOW_CREDENTIALS = True
 CSRF_TRUSTED_ORIGINS = [
@@ -45,7 +47,8 @@ CSRF_TRUSTED_ORIGINS = [
     "http://18.220.214.178",
     "https://18.220.214.178",
     "https://ec2-18-220-214-178.us-east-2.compute.amazonaws.com",
-    "http://127.0.0.1:5173"
+    "http://127.0.0.1:5173",
+    "http://localhost:5173"
 ]
 
 # ------------------------------------
