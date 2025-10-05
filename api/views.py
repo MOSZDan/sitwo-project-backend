@@ -26,7 +26,7 @@ from django_filters.rest_framework import DjangoFilterBackend
 
 from .models import (
     Paciente, Consulta, Odontologo, Horario, Tipodeconsulta,
-    Usuario, Tipodeusuario, Vista, Bitacora, Historialclinico  # Restaurado Vista
+    Usuario, Tipodeusuario, Bitacora, Historialclinico  # Quitado Vista
 )
 
 from .serializers import (
@@ -39,7 +39,6 @@ from .serializers import (
     UpdateConsultaSerializer,
     UsuarioAdminSerializer,
     TipodeusuarioSerializer,
-    VistaSerializer,  # Restaurado
     BitacoraSerializer,
     ReprogramarConsultaSerializer,
     HistorialclinicoCreateSerializer,
@@ -451,40 +450,6 @@ class UsuarioViewSet(ModelViewSet):
 
         return super().partial_update(request, *args, **kwargs)
 
-
-# -------------------- NUEVO: Gestionar Permisos (Vistas) --------------------
-
-class VistaViewSet(ModelViewSet):
-    permission_classes = [IsAuthenticated]
-    queryset = Vista.objects.prefetch_related("roles_permitidos").all()
-    serializer_class = VistaSerializer
-    pagination_class = None
-    http_method_names = ["get", "post", "patch", "delete", "head", "options"]
-
-    def create(self, request, *args, **kwargs):
-        if not (getattr(request.user, "is_staff", False) or _es_admin_por_tabla(request.user)):
-            return Response({"detail": "Solo administradores."}, status=403)
-        return super().create(request, *args, **kwargs)
-
-    def partial_update(self, request, *args, **kwargs):
-        if not (getattr(request.user, "is_staff", False) or _es_admin_por_tabla(request.user)):
-            return Response({"detail": "Solo administradores."}, status=403)
-        return super().partial_update(request, *args, **kwargs)
-
-    def destroy(self, request, *args, **kwargs):
-        if not (getattr(request.user, "is_staff", False) or _es_admin_por_tabla(request.user)):
-            return Response({"detail": "Solo administradores."}, status=403)
-        return super().destroy(request, *args, **kwargs)
-
-    @action(detail=False, methods=["get"], url_path="mis-vistas")
-    def mis_vistas(self, request):
-        dom = getattr(request.user, "usuario", None)
-        rol_id = getattr(dom, "idtipousuario_id", None)
-        if not rol_id:
-            return Response([], status=200)
-        vistas = self.get_queryset().filter(roles_permitidos__id=rol_id)
-        data = VistaSerializer(vistas, many=True).data
-        return Response(data, status=200)
 
 
 def ping(_):

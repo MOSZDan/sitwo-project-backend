@@ -1,6 +1,5 @@
-# Generated manually to fix bitacora codusuario null values issue
-from django.db import migrations, models
-import django.db.models.deletion
+# Generated manually to fix bitacora codusuario null values issue - Sin referencias a Vista
+from django.db import migrations
 
 
 class Migration(migrations.Migration):
@@ -10,7 +9,7 @@ class Migration(migrations.Migration):
     ]
 
     operations = [
-        # Esta migración simplemente verifica que el modelo Bitacora permita valores nulos
+        # Esta migración simplemente asegura que el modelo Bitacora permita valores nulos
         # en el campo usuario, como ya está configurado en el modelo actual
         migrations.RunSQL(
             """

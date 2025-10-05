@@ -3,7 +3,6 @@ from .models import (
     Usuario, Paciente, Odontologo, Recepcionista,
     Horario, Tipodeconsulta, Estadodeconsulta, Consulta,
     Tipodeusuario,   # ← roles
-    Vista,           # ← Restaurado: para gestión de permisos
     Historialclinico,  # ← NUEVO: HCE
 )
 from rest_framework.validators import UniqueTogetherValidator
@@ -450,18 +449,3 @@ def crear_registro_bitacora(accion, usuario=None, ip_address='127.0.0.1', descri
         objeto_id=objeto_id,
         datos_adicionales=datos_adicionales or {}
     )
-
-
-# --------- NUEVO: Vista (gestión de permisos por roles) ---------
-
-class VistaSerializer(serializers.ModelSerializer):
-    roles_permitidos = serializers.PrimaryKeyRelatedField(
-        many=True, queryset=Tipodeusuario.objects.all(), required=False
-    )
-
-    class Meta:
-        model = Vista
-        fields = ['id', 'codigo', 'nombre', 'ruta', 'plataforma', 'descripcion', 'roles_permitidos']
-
-
-# =========================
