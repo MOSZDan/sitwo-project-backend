@@ -9,7 +9,7 @@ from django.utils.http import urlsafe_base64_encode, urlsafe_base64_decode
 from django.core.mail import EmailMultiAlternatives
 from django.core.exceptions import ObjectDoesNotExist, MultipleObjectsReturned
 from django.conf import settings
-from django.db import transaction, IntegrityError, DatabaseError
+from django.db import transaction, IntegrityError, DatabaseError, connection
 
 from rest_framework import status
 from rest_framework.decorators import (
@@ -47,6 +47,14 @@ def _client_ip(request):
     return request.META.get("REMOTE_ADDR") or "0.0.0.0"
 
 
+def close_db_connection():
+    """Cerrar conexión de DB de forma segura"""
+    try:
+        connection.close()
+    except Exception:
+        pass
+
+
 # ============================
 # CSRF
 # ============================
@@ -77,25 +85,25 @@ def auth_register(request):
       2) Crea/actualiza fila en 'usuario' (idtipousuario según rol).
       3) Crea subtipo 1-1 según 'rol' (default: paciente).
     """
-    ser = RegisterSerializer(data=request.data)
-    ser.is_valid(raise_exception=True)
-    data = ser.validated_data
-
-    email = data["email"].lower().strip()
-    password = data["password"]
-    nombre = (data.get("nombre") or "").strip()
-    apellido = (data.get("apellido") or "").strip()
-    telefono = (data.get("telefono") or "").strip() or None
-    sexo = (data.get("sexo") or "").strip() or None
-
-    rol_subtipo = (data.get("rol") or "paciente").strip().lower()
-    idtu = data.get("idtipousuario") or _resolve_tipodeusuario(None)
-
-    carnetidentidad = (data.get("carnetidentidad") or "").strip().upper()
-    fechanacimiento = data.get("fechanacimiento")
-    direccion = (data.get("direccion") or "").strip()
-
     try:
+        ser = RegisterSerializer(data=request.data)
+        ser.is_valid(raise_exception=True)
+        data = ser.validated_data
+
+        email = data["email"].lower().strip()
+        password = data["password"]
+        nombre = (data.get("nombre") or "").strip()
+        apellido = (data.get("apellido") or "").strip()
+        telefono = (data.get("telefono") or "").strip() or None
+        sexo = (data.get("sexo") or "").strip() or None
+
+        rol_subtipo = (data.get("rol") or "paciente").strip().lower()
+        idtu = data.get("idtipousuario") or _resolve_tipodeusuario(None)
+
+        carnetidentidad = (data.get("carnetidentidad") or "").strip().upper()
+        fechanacimiento = data.get("fechanacimiento")
+        direccion = (data.get("direccion") or "").strip()
+
         with transaction.atomic():
             # 1) auth_user: email único
             try:
@@ -165,6 +173,8 @@ def auth_register(request):
             {"detail": f"Error al registrar usuario: {str(e)}"},
             status=status.HTTP_500_INTERNAL_SERVER_ERROR
         )
+    finally:
+        close_db_connection()
 
 
 # ============================
@@ -175,146 +185,96 @@ def auth_register(request):
 @permission_classes([AllowAny])  # público
 def auth_login(request):
     """
-    Login de usuario con manejo robusto de problemas de encoding PostgreSQL
+    Login de usuario con manejo robusto de problemas de conexión PostgreSQL
     Devuelve información del usuario y token de autenticación
     """
-    email = (request.data.get("email") or "").strip().lower()
-    password = request.data.get("password")
-    if not email or not password:
-        return Response({"detail": "Email y contraseña son requeridos"}, status=status.HTTP_400_BAD_REQUEST)
+    try:
+        email = (request.data.get("email") or "").strip().lower()
+        password = request.data.get("password")
+        if not email or not password:
+            return Response({"detail": "Email y contraseña son requeridos"}, status=status.HTTP_400_BAD_REQUEST)
 
-    # Autenticación con reintentos para manejar problemas de encoding
-    user = None
-    max_attempts = 3
+        # Cerrar cualquier conexión previa
+        close_db_connection()
 
-    for attempt in range(max_attempts):
+        # Autenticación simple - sin reintentos excesivos
+        user = authenticate(username=email, password=password)
+
+        if not user:
+            return Response({"detail": "Credenciales inválidas"}, status=status.HTTP_401_UNAUTHORIZED)
+        if not user.is_active:
+            return Response({"detail": "Cuenta desactivada"}, status=status.HTTP_401_UNAUTHORIZED)
+
+        # Obtener o crear token
+        token, _ = Token.objects.get_or_create(user=user)
+
+        # Obtener información del usuario
         try:
-            # Cerrar conexión si hay problemas previos
-            if attempt > 0:
-                from django.db import connection
-                connection.close()
-                import time
-                time.sleep(1)
-
-            user = authenticate(username=email, password=password)
-            break  # Si llegamos aquí, la autenticación funcionó
-
-        except Exception as e:
-            import logging
-            logger = logging.getLogger(__name__)
-            logger.error(f"Error en autenticación, intento {attempt + 1}: {str(e)}")
-            if attempt == max_attempts - 1:  # Último intento
-                return Response(
-                    {"detail": "Error del servidor. Intenta nuevamente en unos momentos."},
-                    status=status.HTTP_503_SERVICE_UNAVAILABLE
-                )
-            continue
-
-    if not user:
-        return Response({"detail": "Credenciales inválidas"}, status=status.HTTP_401_UNAUTHORIZED)
-    if not user.is_active:
-        return Response({"detail": "Cuenta desactivada"}, status=status.HTTP_401_UNAUTHORIZED)
-
-    # Obtener o crear token con reintentos
-    token = None
-    for attempt in range(max_attempts):
-        try:
-            if attempt > 0:
-                from django.db import connection
-                connection.close()
-                import time
-                time.sleep(1)
-
-            token, _ = Token.objects.get_or_create(user=user)
-            break
-
-        except Exception as e:
-            import logging
-            logger = logging.getLogger(__name__)
-            logger.error(f"Error obteniendo token, intento {attempt + 1}: {str(e)}")
-            if attempt == max_attempts - 1:
-                return Response(
-                    {"detail": "Error del servidor. Intenta nuevamente."},
-                    status=status.HTTP_503_SERVICE_UNAVAILABLE
-                )
-            continue
-
-    # Obtener información del usuario con reintentos
-    usuario = None
-    for attempt in range(max_attempts):
-        try:
-            if attempt > 0:
-                from django.db import connection
-                connection.close()
-                import time
-                time.sleep(1)
-
             usuario = Usuario.objects.get(correoelectronico=email)
-            break
-
         except Usuario.DoesNotExist:
             return Response({"detail": "Usuario no encontrado en el sistema"}, status=status.HTTP_404_NOT_FOUND)
-        except Exception as e:
-            import logging
-            logger = logging.getLogger(__name__)
-            logger.error(f"Error obteniendo usuario, intento {attempt + 1}: {str(e)}")
-            if attempt == max_attempts - 1:
-                return Response(
-                    {"detail": "Error del servidor. Intenta nuevamente."},
-                    status=status.HTTP_503_SERVICE_UNAVAILABLE
-                )
-            continue
 
-    # Log de login (tolerante a fallos: jamás rompe el login)
-    try:
-        Bitacora.objects.create(
-            accion='login',
-            descripcion=f'Login exitoso - {usuario.nombre} {usuario.apellido}',
-            codusuario=usuario.codigo,
-            ip_address=_client_ip(request),
-            user_agent=request.META.get('HTTP_USER_AGENT', ''),
-            datos_adicionales={'email': email, 'metodo': 'manual_login_view'}
+        # Log de login (tolerante a fallos: jamás rompe el login)
+        try:
+            Bitacora.objects.create(
+                accion='login',
+                descripcion=f'Login exitoso - {usuario.nombre} {usuario.apellido}',
+                codusuario=usuario.codigo,
+                ip_address=_client_ip(request),
+                user_agent=request.META.get('HTTP_USER_AGENT', ''),
+                datos_adicionales={'email': email, 'metodo': 'manual_login_view'}
+            )
+        except Exception as log_error:
+            # Importante: NO lanzar excepción aquí
+            print(f"[Bitacora] No se pudo guardar el log de login: {log_error}")
+
+        # Determinar subtipo
+        subtipo = "usuario"
+        try:
+            if hasattr(usuario, "paciente"):
+                subtipo = "paciente"
+            elif hasattr(usuario, "odontologo"):
+                subtipo = "odontologo"
+            elif hasattr(usuario, "recepcionista"):
+                subtipo = "recepcionista"
+            elif usuario.idtipousuario_id == 1:
+                subtipo = "administrador"
+        except Exception:
+            pass  # Mantener subtipo por defecto
+
+        return Response({
+            "ok": True,
+            "message": "Login exitoso",
+            "token": token.key,
+            "user": {
+                "id": user.id,
+                "email": user.email,
+                "first_name": user.first_name,
+                "last_name": user.last_name,
+                "is_active": user.is_active,
+            },
+            "usuario": {
+                "codigo": usuario.codigo,
+                "nombre": usuario.nombre,
+                "apellido": usuario.apellido,
+                "telefono": usuario.telefono,
+                "sexo": usuario.sexo,
+                "subtipo": subtipo,
+                "idtipousuario": usuario.idtipousuario_id,
+                "recibir_notificaciones": usuario.recibir_notificaciones,
+            }
+        })
+
+    except Exception as e:
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.error(f"Error en login: {str(e)}")
+        return Response(
+            {"detail": "Error del servidor. Intenta nuevamente."},
+            status=status.HTTP_503_SERVICE_UNAVAILABLE
         )
-    except Exception as log_error:
-        # Importante: NO lanzar excepción aquí
-        print(f"[Bitacora] No se pudo guardar el log de login: {log_error}")
-
-    # Determinar subtipo
-    subtipo = "usuario"
-    try:
-        if hasattr(usuario, "paciente"):
-            subtipo = "paciente"
-        elif hasattr(usuario, "odontologo"):
-            subtipo = "odontologo"
-        elif hasattr(usuario, "recepcionista"):
-            subtipo = "recepcionista"
-        elif usuario.idtipousuario_id == 1:
-            subtipo = "administrador"
-    except Exception:
-        pass  # Mantener subtipo por defecto
-
-    return Response({
-        "ok": True,
-        "message": "Login exitoso",
-        "token": token.key,
-        "user": {
-            "id": user.id,
-            "email": user.email,
-            "first_name": user.first_name,
-            "last_name": user.last_name,
-            "is_active": user.is_active,
-        },
-        "usuario": {
-            "codigo": usuario.codigo,
-            "nombre": usuario.nombre,
-            "apellido": usuario.apellido,
-            "telefono": usuario.telefono,
-            "sexo": usuario.sexo,
-            "subtipo": subtipo,
-            "idtipousuario": usuario.idtipousuario_id,
-            "recibir_notificaciones": usuario.recibir_notificaciones,
-        }
-    })
+    finally:
+        close_db_connection()
 
 
 @api_view(["POST"])
@@ -327,6 +287,8 @@ def auth_logout(request):
         return Response({"detail": "Sesión cerrada correctamente"}, status=status.HTTP_200_OK)
     except Exception:
         return Response({"detail": "Error al cerrar sesión"}, status=status.HTTP_400_BAD_REQUEST)
+    finally:
+        close_db_connection()
 
 
 @api_view(["GET"])
@@ -374,6 +336,8 @@ def auth_user_info(request):
         return Response({"detail": "Usuario no encontrado en el sistema"}, status=status.HTTP_404_NOT_FOUND)
     except Exception as e:
         return Response({"detail": f"Error obteniendo información del usuario: {str(e)}"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+    finally:
+        close_db_connection()
 
 
 # ============================
@@ -403,6 +367,8 @@ class UsuarioMeView(APIView):
                 {"detail": f"Error obteniendo usuario: {str(e)}"},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
+        finally:
+            close_db_connection()
 
     def patch(self, request):
         """PATCH /api/usuario/me - Actualizar datos parciales"""
@@ -428,6 +394,8 @@ class UsuarioMeView(APIView):
                 {"detail": f"Error actualizando usuario: {str(e)}"},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
+        finally:
+            close_db_connection()
 
 
 # ============================
@@ -437,83 +405,91 @@ class UsuarioMeView(APIView):
 @permission_classes([AllowAny])
 def password_reset_request(request):
     """Solicitar reset de contraseña por email"""
-    email = request.data.get("email", "").strip().lower()
-    if not email:
-        return Response({"detail": "Email es requerido"}, status=status.HTTP_400_BAD_REQUEST)
-
     try:
-        user = User.objects.get(email=email)
-
-        # Generar token
-        token = default_token_generator.make_token(user)
-        uid = urlsafe_base64_encode(force_bytes(user.pk))
-
-        # URL del frontend
-        frontend_url = getattr(settings, "FRONTEND_URL", "http://localhost:3000")
-        reset_url = f"{frontend_url}/reset-password/{uid}/{token}/"
-
-        # Enviar email
-        subject = "Restablecer contraseña - Clínica Dental"
-        html_content = f"""
-        <h2>Restablecer contraseña</h2>
-        <p>Has solicitado restablecer tu contraseña.</p>
-        <p>Haz clic en el siguiente enlace para continuar:</p>
-        <a href="{reset_url}">Restablecer contraseña</a>
-        <p>Si no solicitaste este cambio, puedes ignorar este email.</p>
-        """
+        email = request.data.get("email", "").strip().lower()
+        if not email:
+            return Response({"detail": "Email es requerido"}, status=status.HTTP_400_BAD_REQUEST)
 
         try:
-            msg = EmailMultiAlternatives(
-                subject=subject,
-                body="Restablecer contraseña",
-                from_email=getattr(settings, "DEFAULT_FROM_EMAIL", "no-reply@clinica.local"),
-                to=[email]
-            )
-            msg.attach_alternative(html_content, "text/html")
-            msg.send()
-        except Exception as e:
-            print(f"Error enviando email: {e}")
-            # No fallar si el email no se puede enviar
+            user = User.objects.get(email=email)
 
-        return Response({"detail": "Si el email existe, recibirás instrucciones para restablecer tu contraseña"})
+            # Generar token
+            token = default_token_generator.make_token(user)
+            uid = urlsafe_base64_encode(force_bytes(user.pk))
 
-    except User.DoesNotExist:
-        # No revelar si el email existe o no
-        return Response({"detail": "Si el email existe, recibirás instrucciones para restablecer tu contraseña"})
+            # URL del frontend
+            frontend_url = getattr(settings, "FRONTEND_URL", "http://localhost:3000")
+            reset_url = f"{frontend_url}/reset-password/{uid}/{token}/"
+
+            # Enviar email
+            subject = "Restablecer contraseña - Clínica Dental"
+            html_content = f"""
+            <h2>Restablecer contraseña</h2>
+            <p>Has solicitado restablecer tu contraseña.</p>
+            <p>Haz clic en el siguiente enlace para continuar:</p>
+            <a href="{reset_url}">Restablecer contraseña</a>
+            <p>Si no solicitaste este cambio, puedes ignorar este email.</p>
+            """
+
+            try:
+                msg = EmailMultiAlternatives(
+                    subject=subject,
+                    body="Restablecer contraseña",
+                    from_email=getattr(settings, "DEFAULT_FROM_EMAIL", "no-reply@clinica.local"),
+                    to=[email]
+                )
+                msg.attach_alternative(html_content, "text/html")
+                msg.send()
+            except Exception as e:
+                print(f"Error enviando email: {e}")
+                # No fallar si el email no se puede enviar
+
+            return Response({"detail": "Si el email existe, recibirás instrucciones para restablecer tu contraseña"})
+
+        except User.DoesNotExist:
+            # No revelar si el email existe o no
+            return Response({"detail": "Si el email existe, recibirás instrucciones para restablecer tu contraseña"})
+
     except Exception as e:
         return Response({"detail": f"Error procesando solicitud: {str(e)}"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+    finally:
+        close_db_connection()
 
 
 @api_view(["POST"])
 @permission_classes([AllowAny])
 def password_reset_confirm(request):
     """Confirmar reset de contraseña"""
-    uid = request.data.get("uid")
-    token = request.data.get("token")
-    new_password = request.data.get("new_password")
-
-    if not all([uid, token, new_password]):
-        return Response({"detail": "Todos los campos son requeridos"}, status=status.HTTP_400_BAD_REQUEST)
-
     try:
-        # Decodificar UID
-        user_id = force_str(urlsafe_base64_decode(uid))
-        user = User.objects.get(pk=user_id)
+        uid = request.data.get("uid")
+        token = request.data.get("token")
+        new_password = request.data.get("new_password")
 
-        # Verificar token
-        if not default_token_generator.check_token(user, token):
-            return Response({"detail": "Token inválido o expirado"}, status=status.HTTP_400_BAD_REQUEST)
+        if not all([uid, token, new_password]):
+            return Response({"detail": "Todos los campos son requeridos"}, status=status.HTTP_400_BAD_REQUEST)
 
-        # Cambiar contraseña
-        user.set_password(new_password)
-        user.save()
+        try:
+            # Decodificar UID
+            user_id = force_str(urlsafe_base64_decode(uid))
+            user = User.objects.get(pk=user_id)
 
-        return Response({"detail": "Contraseña restablecida correctamente"})
+            # Verificar token
+            if not default_token_generator.check_token(user, token):
+                return Response({"detail": "Token inválido o expirado"}, status=status.HTTP_400_BAD_REQUEST)
 
-    except (TypeError, ValueError, OverflowError, User.DoesNotExist):
-        return Response({"detail": "Token inválido"}, status=status.HTTP_400_BAD_REQUEST)
+            # Cambiar contraseña
+            user.set_password(new_password)
+            user.save()
+
+            return Response({"detail": "Contraseña restablecida correctamente"})
+
+        except (TypeError, ValueError, OverflowError, User.DoesNotExist):
+            return Response({"detail": "Token inválido"}, status=status.HTTP_400_BAD_REQUEST)
+
     except Exception as e:
         return Response({"detail": f"Error restableciendo contraseña: {str(e)}"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+    finally:
+        close_db_connection()
 
 
 # ============================
@@ -542,6 +518,8 @@ def auth_user_settings_update(request):
         return Response({"detail": "Usuario no encontrado"}, status=status.HTTP_404_NOT_FOUND)
     except Exception as e:
         return Response({"detail": f"Error: {str(e)}"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+    finally:
+        close_db_connection()
 
 
 @api_view(["GET", "POST"])
@@ -567,3 +545,6 @@ def notification_preferences(request):
         return Response({"detail": "Usuario no encontrado"}, status=status.HTTP_404_NOT_FOUND)
     except Exception as e:
         return Response({"detail": f"Error: {str(e)}"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+    finally:
+        close_db_connection()
+
