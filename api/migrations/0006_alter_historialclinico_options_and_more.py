@@ -24,22 +24,6 @@ class Migration(migrations.Migration):
             model_name='preferencianotificacion',
             name='unique_preferencia_usuario',
         ),
-        migrations.AddField(
-            model_name='historialclinico',
-            name='episodio',
-            field=models.PositiveIntegerField(default=1),
-        ),
-        migrations.AddField(
-            model_name='historialclinico',
-            name='fecha',
-            field=models.DateTimeField(auto_now_add=True, default=django.utils.timezone.now),
-            preserve_default=False,
-        ),
-        migrations.AddField(
-            model_name='historialclinico',
-            name='updated_at',
-            field=models.DateTimeField(auto_now=True),
-        ),
         migrations.AlterField(
             model_name='historialclinico',
             name='pacientecodigo',
@@ -52,9 +36,5 @@ class Migration(migrations.Migration):
         migrations.AlterUniqueTogether(
             name='preferencianotificacion',
             unique_together={('usuario', 'tipo_notificacion', 'canal_notificacion')},
-        ),
-        migrations.AddConstraint(
-            model_name='historialclinico',
-            constraint=models.UniqueConstraint(fields=('pacientecodigo', 'episodio'), name='uniq_historial_paciente_episodio'),
         ),
     ]

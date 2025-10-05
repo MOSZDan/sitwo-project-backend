@@ -165,47 +165,30 @@ WSGI_APPLICATION = "dental_clinic_backend.wsgi.application"
 # ------------------------------------
 # Base de datos (Configuración simplificada para Render + Supabase)
 # ------------------------------------
-DATABASE_URL = os.getenv("DATABASE_URL")
 
-if DATABASE_URL:
-    # Parsear la URL manualmente para tener más control
-    DATABASES = {
-        "default": dj_database_url.config(
-            env="DATABASE_URL",
-            conn_max_age=0,  # Cerrar conexiones inmediatamente
-            conn_health_checks=False,
-            ssl_require=False,  # Cambiar a False y manejar SSL en OPTIONS
-        )
-    }
+AWS_ACCESS_KEY_ID = 'AKIAYF2ZN5QS4TV4QHE5'
+AWS_SECRET_ACCESS_KEY = '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'
+AWS_STORAGE_BUCKET_NAME = 'dentalclinicbackend'
+AWS_S3_SIGNATURE_NAME = 's3v4',
+AWS_S3_REGION_NAME = 'us-east-2'
+AWS_S3_FILE_OVERWRITE = False
+AWS_DEFAULT_ACL =  None
+AWS_S3_VERITY = True
+DEFAULT_FILE_STORAGE = 'storages.backends.s3boto3.S3Boto3Storage'
 
-    # Configuración específica para PostgreSQL con Session Pooler de Supabase
-    DATABASES['default'].update({
-        'CONN_MAX_AGE': 0,  # Cerrar conexiones inmediatamente (importante para pooler)
-        'CONN_HEALTH_CHECKS': False,
-        'AUTOCOMMIT': True,
-        'ATOMIC_REQUESTS': False,
-        'OPTIONS': {
-            'sslmode': 'require',
-            'connect_timeout': 15,  # Timeout moderado para pooler
-            'keepalives': 0,  # Sin keepalives para liberar conexiones rápido
-            'application_name': 'dental_clinic_render',
-            # Configuración específica para Session Pooler
-            'server_side_binding': False,
+DATABASES = {
+    "default": {
+        "ENGINE": "django.db.backends.postgresql",
+        "NAME": "clinicaldentt",
+        "USER": "postgres",
+        "PASSWORD": "pedritopicapiedra",
+        "HOST": "clinicadentalapp.ctwuseyooir4.us-east-2.rds.amazonaws.com",
+        "PORT": "5432",
+        "OPTIONS": {
+            "sslmode": "require",
         },
-    })
-
-    # Asegurar que el ENGINE sea correcto
-    if 'postgres' in DATABASE_URL:
-        DATABASES['default']['ENGINE'] = 'django.db.backends.postgresql'
-
-else:
-    # Fallback para desarrollo local con SQLite
-    DATABASES = {
-        'default': {
-            'ENGINE': 'django.db.backends.sqlite3',
-            'NAME': BASE_DIR / 'db.sqlite3',
-        }
     }
+}
 
 # ------------------------------------
 # Password validators
