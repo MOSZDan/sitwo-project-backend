@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -e
 
-PROJECT_MAIN_DIR_NAME="dental_clinic_backend"
+PROJECT_MAIN_DIR_NAME="sitwo-project-backend"
 
 # Validate variables
 if [ -z "$PROJECT_MAIN_DIR_NAME" ]; then

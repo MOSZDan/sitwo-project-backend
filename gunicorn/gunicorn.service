@@ -6,7 +6,7 @@ After=network.target
 [Service]
 User=ubuntu
 Group=www-data
-WorkingDirectory=/home/ubuntu/dental-clinic-backend
+WorkingDirectory=/home/ubuntu/sitwo-project-backend
 ExecStart=/home/ubuntu/dental-clinic-backend/venv/bin/gunicorn \
           --access-logfile - \
           --workers 3 \

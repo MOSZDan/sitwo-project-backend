@@ -8,7 +8,7 @@ GIT_REPO_URL="https://github.com/MOSZDan/sitwo-project-backend.git"
 #GIT_REPO_URL="https://<your_username>:<your_PAT>@github.com/codewithmuh/django-aws-ec2-autoscaling.git"
 
 # Replace {YOUR_PROJECT_MAIN_DIR_NAME} with your actual project directory name
-PROJECT_MAIN_DIR_NAME="dental-clinic-backend"
+PROJECT_MAIN_DIR_NAME="sitwo-project-backend"
 
 # Clone repository
 git clone "$GIT_REPO_URL" "/home/ubuntu/$PROJECT_MAIN_DIR_NAME"
