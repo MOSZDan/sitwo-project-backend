@@ -178,17 +178,19 @@ if DATABASE_URL:
         )
     }
 
-    # Configuración específica para PostgreSQL con manejo optimizado de conexiones
+    # Configuración específica para PostgreSQL con Session Pooler de Supabase
     DATABASES['default'].update({
-        'CONN_MAX_AGE': 0,  # Cerrar conexiones inmediatamente después de cada request
+        'CONN_MAX_AGE': 0,  # Cerrar conexiones inmediatamente (importante para pooler)
         'CONN_HEALTH_CHECKS': False,
         'AUTOCOMMIT': True,
         'ATOMIC_REQUESTS': False,
         'OPTIONS': {
             'sslmode': 'require',
-            'connect_timeout': 10,  # Reducir timeout de conexión
-            'keepalives': 0,  # Deshabilitar keepalives para cerrar conexiones
+            'connect_timeout': 15,  # Timeout moderado para pooler
+            'keepalives': 0,  # Sin keepalives para liberar conexiones rápido
             'application_name': 'dental_clinic_render',
+            # Configuración específica para Session Pooler
+            'server_side_binding': False,
         },
     })
 
