@@ -20,7 +20,7 @@ load_dotenv(BASE_DIR / ".env")
 SECRET_KEY = os.getenv("SECRET_KEY", "dev-only-not-secret")
 DEBUG = os.getenv("DEBUG", "False").lower() == "true"
 
-
+ALLOWED_HOSTS = ["localhost", "127.0.0.1", "3.137.195.59", ".amazonaws.com"]
 
 
 # ------------------------------------
