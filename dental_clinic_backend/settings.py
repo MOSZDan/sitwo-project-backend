@@ -76,11 +76,11 @@ else:
     )
     CORS_ALLOW_CREDENTIALS = True
     ALLOWED_HOSTS = _csv_env("ALLOWED_HOSTS",
-                             ["127.0.0.1", "localhost", "sitwo-project-backend-vzq2.onrender.com"])
-    SESSION_COOKIE_SAMESITE = os.getenv("SESSION_COOKIE_SAMESITE", "None")
-    CSRF_COOKIE_SAMESITE = os.getenv("CSRF_COOKIE_SAMESITE", "None")
-    SESSION_COOKIE_SECURE = True
-    CSRF_COOKIE_SECURE = True
+                             ["127.0.0.1", "localhost", "sitwo-project-backend-vzq2.onrender.com", "*"])
+    SESSION_COOKIE_SAMESITE = os.getenv("SESSION_COOKIE_SAMESITE", "Lax")
+    CSRF_COOKIE_SAMESITE = os.getenv("CSRF_COOKIE_SAMESITE", "Lax")
+    SESSION_COOKIE_SECURE = False  # Cambio temporal para HTTP
+    CSRF_COOKIE_SECURE = False     # Cambio temporal para HTTP
 
 # Orígenes confiables para CSRF
 CSRF_TRUSTED_ORIGINS = _csv_env(
@@ -106,8 +106,8 @@ CSRF_TRUSTED_ORIGINS = _csv_env(
 
 CSRF_COOKIE_NAME = "csrftoken"
 SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
-SECURE_HSTS_SECONDS = 0 if DEBUG else 60 * 60 * 24 * 30  # 30 días
-SECURE_SSL_REDIRECT = not DEBUG
+SECURE_HSTS_SECONDS = 0  # Deshabilitado para HTTP
+SECURE_SSL_REDIRECT = False  # Deshabilitado para permitir HTTP
 
 # ------------------------------------
 # Apps

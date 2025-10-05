@@ -7,10 +7,11 @@ After=network.target
 User=ubuntu
 Group=www-data
 WorkingDirectory=/home/ubuntu/sitwo-project-backend
-ExecStart=/home/ubuntu/dental-clinic-backend/venv/bin/gunicorn \
+ExecStart=/home/ubuntu/sitwo-project-backend/venv/bin/gunicorn \
           --access-logfile - \
           --workers 3 \
           --bind unix:/run/gunicorn.sock \
-          core.wsgi:dental_clinic_backend
+          dental_clinic_backend.wsgi:application
+
 [Install]
 WantedBy=multi-user.target
