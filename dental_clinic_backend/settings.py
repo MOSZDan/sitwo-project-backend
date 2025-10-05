@@ -163,33 +163,31 @@ TEMPLATES = [
 WSGI_APPLICATION = "dental_clinic_backend.wsgi.application"
 
 # ------------------------------------
-# Base de datos (Configuración corregida para Render + Supabase)
+# Base de datos (Configuración simplificada para Render + Supabase)
 # ------------------------------------
 DATABASE_URL = os.getenv("DATABASE_URL")
 
 if DATABASE_URL:
-    # Configuración optimizada para Supabase Session Pooler en Render
+    # Parsear la URL manualmente para tener más control
     DATABASES = {
         "default": dj_database_url.config(
             env="DATABASE_URL",
-            conn_max_age=0,  # Sin pool de conexiones persistentes
+            conn_max_age=0,  # Cerrar conexiones inmediatamente
             conn_health_checks=False,
-            ssl_require=True,  # Cambiar a True para consistencia
+            ssl_require=False,  # Cambiar a False y manejar SSL en OPTIONS
         )
     }
 
     # Configuración específica para PostgreSQL con Session Pooler de Supabase
     DATABASES['default'].update({
-        'CONN_MAX_AGE': 0,  # Cerrar conexiones inmediatamente
+        'CONN_MAX_AGE': 0,  # Cerrar conexiones inmediatamente (importante para pooler)
         'CONN_HEALTH_CHECKS': False,
         'AUTOCOMMIT': True,
         'ATOMIC_REQUESTS': False,
         'OPTIONS': {
             'sslmode': 'require',
-            'connect_timeout': 30,  # Timeout más alto para Render
-            'keepalives_idle': 600,
-            'keepalives_interval': 30,
-            'keepalives_count': 3,
+            'connect_timeout': 15,  # Timeout moderado para pooler
+            'keepalives': 0,  # Sin keepalives para liberar conexiones rápido
             'application_name': 'dental_clinic_render',
             # Configuración específica para Session Pooler
             'server_side_binding': False,
@@ -197,7 +195,8 @@ if DATABASE_URL:
     })
 
     # Asegurar que el ENGINE sea correcto
-    DATABASES['default']['ENGINE'] = 'django.db.backends.postgresql'
+    if 'postgres' in DATABASE_URL:
+        DATABASES['default']['ENGINE'] = 'django.db.backends.postgresql'
 
 else:
     # Fallback para desarrollo local con SQLite
