@@ -17,7 +17,7 @@ router.register(r"tipos-consulta", views.TipodeconsultaViewSet, basename="tipos-
 # 👇 SOLO AÑADIR ESTAS DOS RUTAS (admin)
 router.register(r"tipos-usuario", views.TipodeusuarioViewSet, basename="tipos-usuario")
 router.register(r"usuarios", views.UsuarioViewSet, basename="usuarios")
-# router.register(r"vistas", views.VistaViewSet, basename="vistas")  # Comentado temporalmente
+router.register(r"vistas", views.VistaViewSet, basename="vistas")  # Restaurado
 router.register(r'bitacora', views.BitacoraViewSet, basename='bitacora')
 
 # 👇 NUEVO: Historias Clínicas (HCE)
@@ -47,14 +47,11 @@ urlpatterns = [
     path("auth/user/settings/", views_auth.auth_user_settings_update),
     path("auth/user/notifications/", views_auth.notification_preferences),
 
-
     # --- CORRECCIÓN DEFINITIVA ---
     # Eliminamos la ruta conflictiva y dejamos solo esta para el perfil.
     # Ahora manejará GET (leer) y PATCH (actualizar) correctamente.
     path('auth/user/', UserProfileView.as_view(), name='user-profile'),
 
-    # Rutas de los viewsets
-    path("", include(router.urls)),
-    # Router al final
+    # Rutas de los viewsets (router incluido solo una vez)
     path("", include(router.urls)),
 ]
