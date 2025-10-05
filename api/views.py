@@ -84,10 +84,31 @@ def db_health(request):
 
 def db_info(request):
     """Info rápida de la conexión a DB (útil en dev/diagnóstico)."""
-    with connection.cursor() as cur:
-        cur.execute("select current_database(), current_user")
-        db, user = cur.fetchone()
-    return JsonResponse({"database": db, "user": user})
+    try:
+        with connection.cursor() as cur:
+            cur.execute("SELECT current_database(), current_user, version()")
+            db, user, version = cur.fetchone()
+
+        # Cerrar conexión explícitamente
+        connection.close()
+
+        return JsonResponse({
+            "database": db,
+            "user": user,
+            "version": version[:50],  # Limitar longitud
+            "status": "connected"
+        })
+    except Exception as e:
+        # Cerrar conexión en caso de error
+        try:
+            connection.close()
+        except:
+            pass
+
+        return JsonResponse({
+            "error": str(e),
+            "status": "error"
+        }, status=500)
 
 
 def users_count(request):
