@@ -1,8 +1,8 @@
-# api/middleware.py - Reemplazar COMPLETAMENTE
+# api/middleware.py
 
 from django.utils.deprecation import MiddlewareMixin
 from django.contrib.auth import get_user_model
-from .models import Bitacora, Usuario
+from .models import Bitacora, Usuario, Empresa
 import json
 
 
@@ -44,6 +44,59 @@ def get_usuario_from_request(request):
         except Usuario.DoesNotExist:
             pass
     return None
+
+
+class TenantMiddleware(MiddlewareMixin):
+    """
+    Middleware para identificar y establecer el tenant/empresa actual.
+    Prioridad de identificación:
+    1. Header HTTP X-Tenant-ID
+    2. Usuario autenticado (empresa del usuario)
+    3. Subdominio (futuro)
+    """
+
+    def process_request(self, request):
+        empresa = None
+
+        # Opción 1: Por header HTTP X-Tenant-Subdomain (enviado desde frontend)
+        tenant_subdomain = request.META.get('HTTP_X_TENANT_SUBDOMAIN')
+        if tenant_subdomain:
+            try:
+                empresa = Empresa.objects.get(subdomain__iexact=tenant_subdomain, activo=True)
+            except Empresa.DoesNotExist:
+                pass
+
+        # Opción 2: Por header HTTP X-Tenant-ID
+        if not empresa:
+            tenant_id = request.META.get('HTTP_X_TENANT_ID')
+            if tenant_id:
+                try:
+                    empresa = Empresa.objects.get(id=int(tenant_id))
+                except (Empresa.DoesNotExist, ValueError):
+                    pass
+
+        # Opción 3: Por subdominio de la URL (fallback)
+        if not empresa:
+            host = request.get_host().split(':')[0]  # Eliminar puerto
+            # Detectar subdominio (ej: norte.localhost → norte)
+            if '.' in host:
+                subdomain = host.split('.')[0]
+                # Evitar que 'www' o 'localhost' sean considerados subdominios
+                if subdomain not in ['www', 'localhost', '127']:
+                    try:
+                        empresa = Empresa.objects.get(subdomain__iexact=subdomain, activo=True)
+                    except Empresa.DoesNotExist:
+                        pass
+
+        # Opción 4: Por usuario autenticado (fallback final)
+        if not empresa:
+            usuario = get_usuario_from_request(request)
+            if usuario and usuario.empresa:
+                empresa = usuario.empresa
+
+        # Guardar la empresa en el request para uso posterior
+        request.tenant = empresa
+        request.tenant_id = empresa.id if empresa else None
 
 
 class AuditMiddleware(MiddlewareMixin):
@@ -105,10 +158,18 @@ class AuditMiddleware(MiddlewareMixin):
             )
 
             if accion:
+                # Obtener empresa del request (establecida por TenantMiddleware)
+                empresa = getattr(request, 'tenant', None)
+
+                # Si no hay tenant en request, intentar obtener de usuario
+                if not empresa and usuario and usuario.empresa:
+                    empresa = usuario.empresa
+
                 Bitacora.objects.create(
                     accion=accion,
                     descripcion=descripcion,
                     usuario=usuario,
+                    empresa=empresa,  # Agregar empresa
                     ip_address=ip_address,
                     user_agent=user_agent,
                     modelo_afectado=modelo_afectado,
@@ -117,7 +178,9 @@ class AuditMiddleware(MiddlewareMixin):
                         'path': path,
                         'method': method,
                         'status_code': response.status_code,
-                        'source': 'middleware'
+                        'source': 'middleware',
+                        'tenant_id': empresa.id if empresa else None,
+                        'tenant_nombre': empresa.nombre if empresa else None
                     }
                 )
         except Exception as e:

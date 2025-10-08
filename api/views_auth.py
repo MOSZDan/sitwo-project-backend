@@ -124,6 +124,9 @@ def auth_register(request):
                 last_name=apellido,
             )
 
+            # Obtener empresa del tenant (multi-tenancy)
+            empresa = getattr(request, 'tenant', None)
+
             # 2) Fila en 'usuario'
             try:
                 usuario = Usuario.objects.get(correoelectronico=email)
@@ -133,6 +136,8 @@ def auth_register(request):
                 usuario.telefono = telefono
                 usuario.sexo = sexo
                 usuario.idtipousuario_id = idtu
+                if empresa:
+                    usuario.empresa = empresa
                 usuario.save()
             except Usuario.DoesNotExist:
                 # Crear nuevo
@@ -143,6 +148,7 @@ def auth_register(request):
                     telefono=telefono,
                     sexo=sexo,
                     idtipousuario_id=idtu,
+                    empresa=empresa,  # Asignar empresa del tenant
                 )
 
             # 3) Crear subtipo
@@ -153,6 +159,8 @@ def auth_register(request):
                     paciente.carnetidentidad = carnetidentidad
                     paciente.fechanacimiento = fechanacimiento
                     paciente.direccion = direccion
+                    if empresa:
+                        paciente.empresa = empresa
                     paciente.save()
                 except Paciente.DoesNotExist:
                     # Crear
@@ -161,6 +169,7 @@ def auth_register(request):
                         carnetidentidad=carnetidentidad,
                         fechanacimiento=fechanacimiento,
                         direccion=direccion,
+                        empresa=empresa,  # Asignar empresa del tenant
                     )
 
         return Response(
@@ -208,11 +217,24 @@ def auth_login(request):
         # Obtener o crear token
         token, _ = Token.objects.get_or_create(user=user)
 
-        # Obtener información del usuario
+        # Obtener información del usuario y validar tenant
         try:
-            usuario = Usuario.objects.get(correoelectronico=email)
-        except Usuario.DoesNotExist:
-            return Response({"detail": "Usuario no encontrado en el sistema"}, status=status.HTTP_404_NOT_FOUND)
+            usuario_query = Usuario.objects.filter(correoelectronico=email)
+
+            # Filtrar por tenant si está disponible (multi-tenancy)
+            tenant = getattr(request, 'tenant', None)
+            if tenant:
+                usuario_query = usuario_query.filter(empresa=tenant)
+
+            usuario = usuario_query.first()
+
+            if not usuario:
+                return Response(
+                    {"detail": "Credenciales inválidas o usuario no pertenece a esta empresa"},
+                    status=status.HTTP_401_UNAUTHORIZED
+                )
+        except Exception as e:
+            return Response({"detail": "Error al obtener información del usuario"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
         # Log de login (tolerante a fallos: jamás rompe el login)
         try:
@@ -297,7 +319,20 @@ def auth_user_info(request):
     """Información del usuario autenticado"""
     try:
         user = request.user
-        usuario = Usuario.objects.get(correoelectronico=user.email)
+
+        # Filtrar por tenant si está disponible (multi-tenancy)
+        usuario_query = Usuario.objects.filter(correoelectronico=user.email)
+        tenant = getattr(request, 'tenant', None)
+        if tenant:
+            usuario_query = usuario_query.filter(empresa=tenant)
+
+        usuario = usuario_query.first()
+
+        if not usuario:
+            return Response(
+                {"detail": "Usuario no encontrado o no pertenece a esta empresa"},
+                status=status.HTTP_404_NOT_FOUND
+            )
 
         # Determinar subtipo
         subtipo = "usuario"
@@ -351,7 +386,20 @@ class UsuarioMeView(APIView):
         """GET /api/usuario/me - Obtener datos del usuario"""
         try:
             user = request.user
-            usuario = Usuario.objects.get(correoelectronico=user.email)
+
+            # Filtrar por tenant si está disponible (multi-tenancy)
+            usuario_query = Usuario.objects.filter(correoelectronico=user.email)
+            tenant = getattr(request, 'tenant', None)
+            if tenant:
+                usuario_query = usuario_query.filter(empresa=tenant)
+
+            usuario = usuario_query.first()
+
+            if not usuario:
+                return Response(
+                    {"detail": "Usuario no encontrado o no pertenece a esta empresa"},
+                    status=status.HTTP_404_NOT_FOUND
+                )
 
             # Serializar
             serializer = UsuarioMeSerializer(usuario)
@@ -374,7 +422,20 @@ class UsuarioMeView(APIView):
         """PATCH /api/usuario/me - Actualizar datos parciales"""
         try:
             user = request.user
-            usuario = Usuario.objects.get(correoelectronico=user.email)
+
+            # Filtrar por tenant si está disponible (multi-tenancy)
+            usuario_query = Usuario.objects.filter(correoelectronico=user.email)
+            tenant = getattr(request, 'tenant', None)
+            if tenant:
+                usuario_query = usuario_query.filter(empresa=tenant)
+
+            usuario = usuario_query.first()
+
+            if not usuario:
+                return Response(
+                    {"detail": "Usuario no encontrado o no pertenece a esta empresa"},
+                    status=status.HTTP_404_NOT_FOUND
+                )
 
             # Serializar y validar
             serializer = UsuarioMeSerializer(usuario, data=request.data, partial=True)
@@ -501,7 +562,20 @@ def auth_user_settings_update(request):
     """Obtener/actualizar configuraciones del usuario"""
     try:
         user = request.user
-        usuario = Usuario.objects.get(correoelectronico=user.email)
+
+        # Filtrar por tenant si está disponible (multi-tenancy)
+        usuario_query = Usuario.objects.filter(correoelectronico=user.email)
+        tenant = getattr(request, 'tenant', None)
+        if tenant:
+            usuario_query = usuario_query.filter(empresa=tenant)
+
+        usuario = usuario_query.first()
+
+        if not usuario:
+            return Response(
+                {"detail": "Usuario no encontrado o no pertenece a esta empresa"},
+                status=status.HTTP_404_NOT_FOUND
+            )
 
         if request.method == "GET":
             serializer = UserNotificationSettingsSerializer(usuario)
@@ -528,7 +602,20 @@ def notification_preferences(request):
     """Gestionar preferencias de notificaciones"""
     try:
         user = request.user
-        usuario = Usuario.objects.get(correoelectronico=user.email)
+
+        # Filtrar por tenant si está disponible (multi-tenancy)
+        usuario_query = Usuario.objects.filter(correoelectronico=user.email)
+        tenant = getattr(request, 'tenant', None)
+        if tenant:
+            usuario_query = usuario_query.filter(empresa=tenant)
+
+        usuario = usuario_query.first()
+
+        if not usuario:
+            return Response(
+                {"detail": "Usuario no encontrado o no pertenece a esta empresa"},
+                status=status.HTTP_404_NOT_FOUND
+            )
 
         if request.method == "GET":
             serializer = NotificationPreferencesSerializer(usuario)

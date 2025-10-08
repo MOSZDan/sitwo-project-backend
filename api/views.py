@@ -49,8 +49,25 @@ from .serializers import (
 # -------------------- Health / Utils --------------------
 
 def health(request):
-    """Ping de salud"""
-    return JsonResponse({"ok": True})
+    """Ping de salud - Muestra información del tenant detectado"""
+    tenant = getattr(request, 'tenant', None)
+
+    response_data = {
+        "ok": True,
+        "tenant_detected": tenant is not None,
+    }
+
+    if tenant:
+        response_data["tenant"] = {
+            "id": tenant.id,
+            "nombre": tenant.nombre,
+            "subdomain": tenant.subdomain,
+            "activo": tenant.activo,
+        }
+    else:
+        response_data["message"] = "No se detectó ningún tenant"
+
+    return JsonResponse(response_data)
 
 
 def db_health(request):
@@ -143,57 +160,67 @@ def _es_admin_por_tabla(dj_user) -> bool:
 class PacienteViewSet(ReadOnlyModelViewSet):
     """
     API read-only de Pacientes.
-    Solo devuelve pacientes cuyo usuario tiene rol id=2.
+    Solo devuelve pacientes cuyo usuario tiene rol id=2 Y pertenecen a la empresa del tenant.
     """
     permission_classes = [IsAuthenticated]
-    queryset = (
-        Paciente.objects
-        .select_related("codusuario")
-        .filter(codusuario__idtipousuario_id=2)
-        .all()
-    )
     serializer_class = PacienteSerializer
+
+    def get_queryset(self):
+        """Filtra pacientes por empresa (multi-tenancy)"""
+        queryset = (
+            Paciente.objects
+            .select_related("codusuario")
+            .filter(codusuario__idtipousuario_id=2)
+        )
+
+        # Filtrar por tenant si está disponible
+        if hasattr(self.request, 'tenant') and self.request.tenant:
+            queryset = queryset.filter(empresa=self.request.tenant)
+
+        return queryset
 
 # -------------------- Consultas (Citas) --------------------
 
 class ConsultaViewSet(ModelViewSet):
     """
     API para Consultas. Permite crear, leer, actualizar y eliminar.
+    Filtrado por tenant (multi-tenancy).
     """
     permission_classes = [IsAuthenticated]
-    queryset = (
-        Consulta.objects.select_related(
+    serializer_class = ConsultaSerializer
+    filter_backends = [DjangoFilterBackend]
+    filterset_fields = ['codpaciente', 'fecha']
+
+    def get_queryset(self):
+        """Filtra consultas por empresa (multi-tenancy)"""
+        queryset = Consulta.objects.select_related(
             "codpaciente__codusuario",
             "cododontologo__codusuario",
             "codrecepcionista__codusuario",
             "idhorario",
             "idtipoconsulta",
             "idestadoconsulta",
-        ).all()
-    )
-    filter_backends = [DjangoFilterBackend]
-    filterset_fields = ['codpaciente', 'fecha']
+        )
 
+        # Filtrar por tenant si está disponible
+        if hasattr(self.request, 'tenant') and self.request.tenant:
+            queryset = queryset.filter(empresa=self.request.tenant)
 
-
-    def get_serializer_class(self):
-        # --- MODIFICACIÓN: Añadir el nuevo serializador ---
-        if self.action == 'reprogramar':
-            return ReprogramarConsultaSerializer
-        if self.action in ["create", "update"]:
-            return CreateConsultaSerializer
-        if self.action == "partial_update":
-            return UpdateConsultaSerializer
-        return ConsultaSerializer
-
-    # El método perform_create se mantiene igual para enviar correos
+        return queryset
 
     def perform_create(self, serializer):
-        consulta = serializer.save()
+        """Asigna automáticamente la empresa del tenant al crear una consulta"""
+        # Asignar empresa del tenant
+        if hasattr(self.request, 'tenant') and self.request.tenant:
+            serializer.save(empresa=self.request.tenant)
+        else:
+            serializer.save()
+
+        # Enviar email de confirmación (código existente)
+        consulta = serializer.instance
         paciente = consulta.codpaciente
         usuario_paciente = paciente.codusuario
 
-        # Verificar si el usuario quiere recibir notificaciones por email
         if getattr(usuario_paciente, "notificaciones_email", False):
             try:
                 subject = "Confirmación de tu cita en Clínica Dental"
@@ -224,6 +251,15 @@ Si necesitas cancelar o reprogramar tu cita, ponte en contacto con nosotros.
             except Exception as e:
                 print(f"Error al enviar correo de notificación: {e}")
 
+    def get_serializer_class(self):
+        # --- MODIFICACIÓN: Añadir el nuevo serializador ---
+        if self.action == 'reprogramar':
+            return ReprogramarConsultaSerializer
+        if self.action in ["create", "update"]:
+            return CreateConsultaSerializer
+        if self.action == "partial_update":
+            return UpdateConsultaSerializer
+        return ConsultaSerializer
 
     @action(detail=True, methods=['patch'], url_path='reprogramar')
     def reprogramar(self, request, pk=None):
@@ -369,14 +405,32 @@ Si necesitas cancelar o reprogramar tu cita, ponte en contacto con nosotros.
 
 class OdontologoViewSet(ReadOnlyModelViewSet):
     permission_classes = [IsAuthenticated]
-    queryset = Odontologo.objects.all()
     serializer_class = OdontologoMiniSerializer
+
+    def get_queryset(self):
+        """Filtra odontólogos por empresa (multi-tenancy)"""
+        queryset = Odontologo.objects.all()
+
+        # Filtrar por tenant si está disponible
+        if hasattr(self.request, 'tenant') and self.request.tenant:
+            queryset = queryset.filter(empresa=self.request.tenant)
+
+        return queryset
 
 
 class HorarioViewSet(ReadOnlyModelViewSet):
     permission_classes = [IsAuthenticated]
-    queryset = Horario.objects.all()
     serializer_class = HorarioSerializer
+
+    def get_queryset(self):
+        """Filtra horarios por empresa (multi-tenancy)"""
+        queryset = Horario.objects.all()
+
+        # Filtrar por tenant si está disponible
+        if hasattr(self.request, 'tenant') and self.request.tenant:
+            queryset = queryset.filter(empresa=self.request.tenant)
+
+        return queryset
 
     @action(detail=False, methods=['get'], url_path='disponibles')
     def disponibles(self, request):
@@ -393,14 +447,20 @@ class HorarioViewSet(ReadOnlyModelViewSet):
                 status=status.HTTP_400_BAD_REQUEST
             )
 
-        # Obtener todos los horarios
-        todos_horarios = Horario.objects.all()
+        # Obtener todos los horarios del tenant
+        todos_horarios = self.get_queryset()
 
-        # Filtrar horarios ocupados para ese odontólogo en esa fecha
-        horarios_ocupados = Consulta.objects.filter(
+        # Filtrar horarios ocupados para ese odontólogo en esa fecha (mismo tenant)
+        horarios_ocupados_query = Consulta.objects.filter(
             cododontologo_id=odontologo_id,
             fecha=fecha
-        ).values_list('idhorario_id', flat=True)
+        )
+
+        # Filtrar por tenant
+        if hasattr(request, 'tenant') and request.tenant:
+            horarios_ocupados_query = horarios_ocupados_query.filter(empresa=request.tenant)
+
+        horarios_ocupados = horarios_ocupados_query.values_list('idhorario_id', flat=True)
 
         # Horarios disponibles = todos - ocupados
         horarios_disponibles = todos_horarios.exclude(id__in=horarios_ocupados)
@@ -411,22 +471,39 @@ class HorarioViewSet(ReadOnlyModelViewSet):
 
 class TipodeconsultaViewSet(ReadOnlyModelViewSet):
     permission_classes = [IsAuthenticated]
-    queryset = Tipodeconsulta.objects.all()
     serializer_class = TipodeconsultaSerializer
+
+    def get_queryset(self):
+        """Filtra tipos de consulta por empresa (multi-tenancy)"""
+        queryset = Tipodeconsulta.objects.all()
+
+        # Filtrar por tenant si está disponible
+        if hasattr(self.request, 'tenant') and self.request.tenant:
+            queryset = queryset.filter(empresa=self.request.tenant)
+
+        return queryset
 
 
 # -------------------- ADMIN: Roles y Usuarios --------------------
 
 class TipodeusuarioViewSet(ReadOnlyModelViewSet):
     permission_classes = [IsAuthenticated]
-    queryset = Tipodeusuario.objects.all().order_by("id")
     serializer_class = TipodeusuarioSerializer
     pagination_class = None
+
+    def get_queryset(self):
+        """Filtra tipos de usuario por empresa (multi-tenancy)"""
+        queryset = Tipodeusuario.objects.all().order_by("id")
+
+        # Filtrar por tenant si está disponible
+        if hasattr(self.request, 'tenant') and self.request.tenant:
+            queryset = queryset.filter(empresa=self.request.tenant)
+
+        return queryset
 
 
 class UsuarioViewSet(ModelViewSet):
     permission_classes = [IsAuthenticated]
-    queryset = Usuario.objects.select_related("idtipousuario").all()
     serializer_class = UsuarioAdminSerializer
 
     filter_backends = [SearchFilter, OrderingFilter]
@@ -435,6 +512,16 @@ class UsuarioViewSet(ModelViewSet):
 
     lookup_field = "codigo"
     http_method_names = ["get", "patch", "head", "options"]
+
+    def get_queryset(self):
+        """Filtra usuarios por empresa (multi-tenancy)"""
+        queryset = Usuario.objects.select_related("idtipousuario")
+
+        # Filtrar por tenant si está disponible
+        if hasattr(self.request, 'tenant') and self.request.tenant:
+            queryset = queryset.filter(empresa=self.request.tenant)
+
+        return queryset
 
     def partial_update(self, request, *args, **kwargs):
         """
@@ -488,9 +575,6 @@ class HistorialclinicoViewSet(mixins.CreateModelMixin,
       - GET  /api/historias-clinicas/?paciente=<id>  (listar HCE por paciente; ordenado por fecha/episodio)
     """
     permission_classes = [IsAuthenticated]
-    queryset = Historialclinico.objects.select_related(
-        'pacientecodigo', 'pacientecodigo__codusuario'
-    ).all()
 
     def get_serializer_class(self):
         return (HistorialclinicoCreateSerializer
@@ -498,11 +582,28 @@ class HistorialclinicoViewSet(mixins.CreateModelMixin,
                 else HistorialclinicoListSerializer)
 
     def get_queryset(self):
-        qs = super().get_queryset()
+        """Filtra historias clínicas por empresa (multi-tenancy)"""
+        qs = Historialclinico.objects.select_related(
+            'pacientecodigo', 'pacientecodigo__codusuario'
+        )
+
+        # Filtrar por tenant si está disponible
+        if hasattr(self.request, 'tenant') and self.request.tenant:
+            qs = qs.filter(empresa=self.request.tenant)
+
+        # Filtro adicional por paciente específico
         pid = self.request.query_params.get('paciente')
         if pid:
             qs = qs.filter(pacientecodigo_id=pid)
+
         return qs.order_by('-fecha', '-episodio')
+
+    def perform_create(self, serializer):
+        """Asigna automáticamente la empresa del tenant al crear historia clínica"""
+        if hasattr(self.request, 'tenant') and self.request.tenant:
+            serializer.save(empresa=self.request.tenant)
+        else:
+            serializer.save()
 
 # -------------------- Bitácora de Auditoría --------------------
 
@@ -525,7 +626,11 @@ class BitacoraViewSet(ReadOnlyModelViewSet):
         if not _es_admin_por_tabla(self.request.user):
             return Bitacora.objects.none()
 
-        queryset = Bitacora.objects.select_related('usuario').all()
+        queryset = Bitacora.objects.select_related('usuario')
+
+        # Filtrar por tenant si está disponible (multi-tenancy)
+        if hasattr(self.request, 'tenant') and self.request.tenant:
+            queryset = queryset.filter(empresa=self.request.tenant)
 
         # Filtros opcionales por parámetros GET
         accion = self.request.query_params.get('accion', None)
