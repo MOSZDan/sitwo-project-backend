@@ -30,27 +30,43 @@ ALLOWED_HOSTS = [
     ".amazonaws.com",
     "ec2-18-220-214-178.us-east-2.compute.amazonaws.com",
     "sitwo-project.onrender.com",
-    "127.0.0.1:5173",
-    "http://localhost:5173",
     "notificct.dpdns.org",
-    "balancearin-1841542738.us-east-2.elb.amazonaws.com"
+    "balancearin-1841542738.us-east-2.elb.amazonaws.com",
+    # Multi-tenancy: Permitir subdominios
+    ".localhost",  # Permite *.localhost (norte.localhost, sur.localhost, etc.)
+    ".notificct.dpdns.org",  # Permite *.notificct.dpdns.org en producción
 ]
 
-CORS_ALLOWED_ORIGINS = [
-    "https://sitwo-project.onrender.com",
-    "http://localhost:3000",
-    "http://127.0.0.1:3000",
-    "http://127.0.0.1:5173",
-    "http://localhost:5173"
-]
+# En desarrollo, permitir todos los orígenes (incluyendo subdominios)
+if DEBUG:
+    CORS_ALLOW_ALL_ORIGINS = True
+else:
+    # En producción, lista específica de orígenes permitidos
+    CORS_ALLOWED_ORIGINS = [
+        "https://sitwo-project.onrender.com",
+        "https://notificct.dpdns.org",
+        # Agregar subdominios específicos en producción si es necesario
+        "https://norte.notificct.dpdns.org",
+        "https://sur.notificct.dpdns.org",
+        "https://este.notificct.dpdns.org",
+    ]
+
 CORS_ALLOW_CREDENTIALS = True
+
 CSRF_TRUSTED_ORIGINS = [
     "https://sitwo-project.onrender.com",
     "http://18.220.214.178",
     "https://18.220.214.178",
     "https://ec2-18-220-214-178.us-east-2.compute.amazonaws.com",
-    "http://127.0.0.1:5173",
-    "http://localhost:5173"
+    # Multi-tenancy: Permitir subdominios en desarrollo
+    "http://localhost:5173",
+    "http://*.localhost:5173",
+    "http://norte.localhost:5173",
+    "http://sur.localhost:5173",
+    "http://este.localhost:5173",
+    # Multi-tenancy: Permitir subdominios en producción
+    "https://notificct.dpdns.org",
+    "https://*.notificct.dpdns.org",
 ]
 
 # ------------------------------------
@@ -84,8 +100,8 @@ MIDDLEWARE = [
     "django.contrib.auth.middleware.AuthenticationMiddleware",
     "django.contrib.messages.middleware.MessageMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
-    "api.middleware.AuditMiddleware",
-    "whitenoise.middleware.WhiteNoiseMiddleware",
+    "api.middleware.TenantMiddleware",  # Multi-tenancy: identificar empresa
+    "api.middleware.AuditMiddleware",    # Auditoría (después de TenantMiddleware)
 ]
 
 ROOT_URLCONF = "dental_clinic_backend.urls"

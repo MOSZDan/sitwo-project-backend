@@ -6,6 +6,34 @@
 #   * Remove `managed = False` lines if you wish to allow Django to create, modify, and delete the table
 # Feel free to rename the models, but don't rename db_table values or field names.
 from django.db import models
+from django.contrib.auth.models import AbstractBaseUser, BaseUserManager, PermissionsMixin
+
+
+# +++ NUEVO MODELO EMPRESA +++
+class Empresa(models.Model):
+    """Representa a un cliente (una clínica dental) en el sistema SaaS."""
+    nombre = models.CharField(max_length=255, unique=True)
+    subdomain = models.CharField(
+        max_length=100,
+        unique=True,
+        null=True,  # Temporalmente nullable para la migración
+        blank=True,
+        help_text="Subdominio para acceso multi-tenant (ej: clinica1, clinica2)"
+    )
+    fecha_creacion = models.DateTimeField(auto_now_add=True)
+    activo = models.BooleanField(
+        default=True,
+        help_text="Indica si la empresa está activa en el sistema"
+    )
+
+    class Meta:
+        db_table = 'api_empresa'
+        verbose_name = 'Empresa'
+        verbose_name_plural = 'Empresas'
+        ordering = ['nombre']
+
+    def __str__(self):
+        return f"{self.nombre} ({self.subdomain})"
 
 
 class Usuario(models.Model):
@@ -19,8 +47,10 @@ class Usuario(models.Model):
     recibir_notificaciones = models.BooleanField(default=True)
     notificaciones_email = models.BooleanField(default=True)
     notificaciones_push = models.BooleanField(default=False)
+    empresa = models.ForeignKey(Empresa, on_delete=models.CASCADE, related_name='usuarios', null=True, blank=True)
+
     class Meta:
-        #managed = False
+        # managed = False
         db_table = 'usuario'
 
 
@@ -29,9 +59,10 @@ class Paciente(models.Model):
     carnetidentidad = models.CharField(unique=True, max_length=50, blank=True, null=True)
     fechanacimiento = models.DateField(blank=True, null=True)
     direccion = models.TextField(blank=True, null=True)
+    empresa = models.ForeignKey(Empresa, on_delete=models.CASCADE, related_name='pacientes', null=True, blank=True)
 
     class Meta:
-       # managed = False
+        # managed = False
         db_table = 'paciente'
 
 
@@ -40,18 +71,20 @@ class Odontologo(models.Model):
     especialidad = models.CharField(max_length=255, blank=True, null=True)
     experienciaprofesional = models.TextField(blank=True, null=True)
     nromatricula = models.CharField(unique=True, max_length=100, blank=True, null=True)
+    empresa = models.ForeignKey(Empresa, on_delete=models.CASCADE, related_name='odontologos', null=True, blank=True)
 
     class Meta:
-        #managed = False
+        # managed = False
         db_table = 'odontologo'
 
 
 class Recepcionista(models.Model):
     codusuario = models.OneToOneField(Usuario, models.DO_NOTHING, db_column='codusuario', primary_key=True)
     habilidadessoftware = models.TextField(blank=True, null=True)
+    empresa = models.ForeignKey(Empresa, on_delete=models.CASCADE, related_name='recepcionistas', null=True, blank=True)
 
     class Meta:
-        #managed = False
+        # managed = False
         db_table = 'recepcionista'
 
 
@@ -59,21 +92,24 @@ class Consulta(models.Model):
     fecha = models.DateField()
     codpaciente = models.ForeignKey(Paciente, models.DO_NOTHING, db_column='codpaciente')
     cododontologo = models.ForeignKey(Odontologo, models.DO_NOTHING, db_column='cododontologo', blank=True, null=True)
-    codrecepcionista = models.ForeignKey(Recepcionista, models.DO_NOTHING, db_column='codrecepcionista', blank=True, null=True)
+    codrecepcionista = models.ForeignKey(Recepcionista, models.DO_NOTHING, db_column='codrecepcionista', blank=True,
+                                         null=True)
     idhorario = models.ForeignKey('Horario', models.DO_NOTHING, db_column='idhorario')
     idtipoconsulta = models.ForeignKey('Tipodeconsulta', models.DO_NOTHING, db_column='idtipoconsulta')
     idestadoconsulta = models.ForeignKey('Estadodeconsulta', models.DO_NOTHING, db_column='idestadoconsulta')
+    empresa = models.ForeignKey(Empresa, on_delete=models.CASCADE, related_name='cosultas', null=True, blank=True)
 
     class Meta:
-        #managed = False
+        # managed = False
         db_table = 'consulta'
 
 
 class Tipodeconsulta(models.Model):
     nombreconsulta = models.CharField(max_length=255)
+    empresa = models.ForeignKey(Empresa, on_delete=models.CASCADE, related_name='tipos_consulta', null=True, blank=True)
 
     class Meta:
-        #managed = False
+        # managed = False
         db_table = 'tipodeconsulta'
 
 
@@ -93,9 +129,10 @@ class Historialclinico(models.Model):
     diagnostico = models.TextField(blank=True, null=True)
 
     # NUEVOS (ya creados en la BD con tu script)
-    episodio = models.PositiveIntegerField(default=1)     # 1..n por paciente
-    fecha = models.DateTimeField(auto_now_add=True)       # timestamptz DEFAULT now()
-    updated_at = models.DateTimeField(auto_now=True)      # timestamptz DEFAULT now()
+    episodio = models.PositiveIntegerField(default=1)  # 1..n por paciente
+    fecha = models.DateTimeField(auto_now_add=True)  # timestamptz DEFAULT now()
+    updated_at = models.DateTimeField(auto_now=True)  # timestamptz DEFAULT now()
+    empresa = models.ForeignKey(Empresa, on_delete=models.CASCADE, related_name='historiales', null=True, blank=True)
 
     class Meta:
         db_table = 'historialclinico'
@@ -110,13 +147,15 @@ class Historialclinico(models.Model):
     def __str__(self):
         return f'HCE paciente={self.pacientecodigo_id} episodio={self.episodio}'
 
+
 class Servicio(models.Model):
     nombre = models.CharField(max_length=255)
     descripcion = models.TextField(blank=True, null=True)
     costobase = models.DecimalField(max_digits=10, decimal_places=2)
+    empresa = models.ForeignKey(Empresa, on_delete=models.CASCADE, related_name='servicios', null=True, blank=True)
 
     class Meta:
-        #managed = False
+        # managed = False
         db_table = 'servicio'
 
 
@@ -125,9 +164,10 @@ class Insumo(models.Model):
     descripcion = models.TextField(blank=True, null=True)
     stock = models.IntegerField(blank=True, null=True)
     unidaddemedida = models.CharField(max_length=50, blank=True, null=True)
+    empresa = models.ForeignKey(Empresa, on_delete=models.CASCADE, related_name='insumos', null=True, blank=True)
 
     class Meta:
-        #managed = False
+        # managed = False
         db_table = 'insumo'
 
 
@@ -135,9 +175,10 @@ class Medicamento(models.Model):
     nombre = models.CharField(max_length=255)
     cantidadmiligramos = models.CharField(max_length=100, blank=True, null=True)
     presentacion = models.CharField(max_length=255, blank=True, null=True)
+    empresa = models.ForeignKey(Empresa, on_delete=models.CASCADE, related_name='medicamentos', null=True, blank=True)
 
     class Meta:
-        #managed = False
+        # managed = False
         db_table = 'medicamento'
 
 
@@ -145,9 +186,10 @@ class Recetamedica(models.Model):
     codpaciente = models.ForeignKey(Paciente, models.DO_NOTHING, db_column='codpaciente')
     cododontologo = models.ForeignKey(Odontologo, models.DO_NOTHING, db_column='cododontologo')
     fechaemision = models.DateField()
+    empresa = models.ForeignKey(Empresa, on_delete=models.CASCADE, related_name='recetas', null=True, blank=True)
 
     class Meta:
-        #managed = False
+        # managed = False
         db_table = 'recetamedica'
 
 
@@ -155,10 +197,11 @@ class Imtemreceta(models.Model):
     idreceta = models.ForeignKey(Recetamedica, models.DO_NOTHING, db_column='idreceta')
     idmedicamento = models.ForeignKey(Medicamento, models.DO_NOTHING, db_column='idmedicamento')
     posologia = models.TextField()
+    empresa = models.ForeignKey(Empresa, on_delete=models.CASCADE, related_name='itemsReceta', null=True, blank=True)
 
     class Meta:
-        #managed = False
-        db_table = 'imtemreceta'
+        # managed = False
+        db_table = 'itemreceta'
 
 
 class Plandetratamiento(models.Model):
@@ -168,21 +211,26 @@ class Plandetratamiento(models.Model):
     fechaplan = models.DateField()
     descuento = models.DecimalField(max_digits=10, decimal_places=2, blank=True, null=True)
     montototal = models.DecimalField(max_digits=10, decimal_places=2, blank=True, null=True)
+    empresa = models.ForeignKey(Empresa, on_delete=models.CASCADE, related_name='planesTratamientos', null=True,
+                                blank=True)
 
     class Meta:
-        #managed = False
+        # managed = False
         db_table = 'plandetratamiento'
 
 
 class Itemplandetratamiento(models.Model):
     idplantratamiento = models.ForeignKey(Plandetratamiento, models.DO_NOTHING, db_column='idplantratamiento')
     idservicio = models.ForeignKey(Servicio, models.DO_NOTHING, db_column='idservicio')
-    idpiezadental = models.ForeignKey('Piezadental', models.DO_NOTHING, db_column='idpiezadental', blank=True, null=True)
+    idpiezadental = models.ForeignKey('Piezadental', models.DO_NOTHING, db_column='idpiezadental', blank=True,
+                                      null=True)
     idestado = models.ForeignKey('Estado', models.DO_NOTHING, db_column='idestado')
     costofinal = models.DecimalField(max_digits=10, decimal_places=2)
+    empresa = models.ForeignKey(Empresa, on_delete=models.CASCADE, related_name='itemsPlanesTratamientos', null=True,
+                                blank=True)
 
     class Meta:
-        #managed = False
+        # managed = False
         db_table = 'itemplandetratamiento'
 
 
@@ -191,9 +239,11 @@ class Factura(models.Model):
     idestadofactura = models.ForeignKey('Estadodefactura', models.DO_NOTHING, db_column='idestadofactura')
     fechaemision = models.DateField()
     montototal = models.DecimalField(max_digits=10, decimal_places=2)
+    empresa = models.ForeignKey(Empresa, on_delete=models.CASCADE, related_name='facturas', null=True,
+                                blank=True)
 
     class Meta:
-        #managed = False
+        # managed = False
         db_table = 'factura'
 
 
@@ -201,9 +251,11 @@ class Itemdefactura(models.Model):
     idfactura = models.ForeignKey(Factura, models.DO_NOTHING, db_column='idfactura')
     descripcion = models.TextField()
     monto = models.DecimalField(max_digits=10, decimal_places=2)
+    empresa = models.ForeignKey(Empresa, on_delete=models.CASCADE, related_name='itemsFacturas', null=True,
+                                blank=True)
 
     class Meta:
-        #managed = False
+        # managed = False
         db_table = 'itemdefactura'
 
 
@@ -212,9 +264,10 @@ class Pago(models.Model):
     idtipopago = models.ForeignKey('Tipopago', models.DO_NOTHING, db_column='idtipopago')
     montopagado = models.DecimalField(max_digits=10, decimal_places=2)
     fechapago = models.DateField()
-
+    empresa = models.ForeignKey(Empresa, on_delete=models.CASCADE, related_name='pagos', null=True,
+                                blank=True)
     class Meta:
-        #managed = False
+        # managed = False
         db_table = 'pago'
 
 
@@ -223,18 +276,20 @@ class Documentoadjunto(models.Model):
     nombredocumento = models.CharField(max_length=255)
     rutaarchivo = models.CharField(max_length=512)
     fechacreacion = models.DateField(blank=True, null=True)
-
+    empresa = models.ForeignKey(Empresa, on_delete=models.CASCADE, related_name='documentosAdjuntos', null=True,
+                                blank=True)
     class Meta:
-        #managed = False
+        # managed = False
         db_table = 'documentoadjunto'
 
 
 class Piezadental(models.Model):
     nombrepieza = models.CharField(max_length=100)
     grupo = models.CharField(max_length=100, blank=True, null=True)
+    empresa = models.ForeignKey(Empresa, on_delete=models.CASCADE, related_name='piezas_dentales', null=True, blank=True)
 
     class Meta:
-        #managed = False
+        # managed = False
         db_table = 'piezadental'
 
 
@@ -243,42 +298,49 @@ class Registroodontograma(models.Model):
     idpiezadental = models.ForeignKey(Piezadental, models.DO_NOTHING, db_column='idpiezadental')
     diagnostico = models.TextField(blank=True, null=True)
     fecharegistro = models.DateField()
-
+    empresa = models.ForeignKey(Empresa, on_delete=models.CASCADE, related_name='registrosOdontogramas', null=True,
+                                blank=True)
     class Meta:
-        #managed = False
+        # managed = False
         db_table = 'registroodontograma'
 
 
 class Horario(models.Model):
     hora = models.TimeField(unique=True)
+    empresa = models.ForeignKey(Empresa, on_delete=models.CASCADE, related_name='horarios', null=True, blank=True)
 
     class Meta:
-        #managed = False
+        # managed = False
         db_table = 'horario'
 
 
 class Estado(models.Model):
     estado = models.CharField(unique=True, max_length=100)
+    empresa = models.ForeignKey(Empresa, on_delete=models.CASCADE, related_name='estados', null=True, blank=True)
 
     class Meta:
-        #managed = False
+        # managed = False
         db_table = 'estado'
 
 
 class Estadodeconsulta(models.Model):
     estado = models.CharField(unique=True, max_length=100)
+    empresa = models.ForeignKey(Empresa, on_delete=models.CASCADE, related_name='estados_consulta', null=True, blank=True)
 
     class Meta:
-        #managed = False
+        # managed = False
         db_table = 'estadodeconsulta'
 
 
 class Estadodefactura(models.Model):
     estado = models.CharField(unique=True, max_length=100)
+    empresa = models.ForeignKey(Empresa, on_delete=models.CASCADE, related_name='estados_factura', null=True, blank=True)
 
     class Meta:
-        #managed = False
+        # managed = False
         db_table = 'estadodefactura'
+
+
 # This is an auto-generated Django model module.
 # You'll have to do the following manually to clean this up:
 #   * Rearrange models' order
@@ -292,17 +354,19 @@ from django.db import models
 class Tipodeusuario(models.Model):
     rol = models.CharField(unique=True, max_length=100)
     descripcion = models.TextField(blank=True, null=True)
+    empresa = models.ForeignKey(Empresa, on_delete=models.CASCADE, related_name='tipos_usuario', null=True, blank=True)
 
     class Meta:
-        #managed = False
+        # managed = False
         db_table = 'tipodeusuario'
 
 
 class Tipopago(models.Model):
     nombrepago = models.CharField(unique=True, max_length=100)
+    empresa = models.ForeignKey(Empresa, on_delete=models.CASCADE, related_name='tipos_pago', null=True, blank=True)
 
     class Meta:
-        #managed = False
+        # managed = False
         db_table = 'tipopago'
 
 
@@ -341,7 +405,8 @@ class Bitacora(models.Model):
     ip_address = models.GenericIPAddressField()
     user_agent = models.TextField()
     timestamp = models.DateTimeField(auto_now_add=True, null=True, blank=True)  # Agregado null=True, blank=True
-
+    empresa = models.ForeignKey(Empresa, on_delete=models.CASCADE, related_name='bitacoras', null=True,
+                                blank=True)
     class Meta:
         db_table = 'bitacora'
         verbose_name = 'Bitácora'
