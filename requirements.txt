@@ -1,22 +1,48 @@
-django-filter
+# Core Django
+Django==5.2.6
 asgiref==3.9.1
+sqlparse==0.5.3
+tzdata==2025.2
+typing_extensions==4.15.0
+
+# Django REST Framework
+djangorestframework==3.16.1
+djangorestframework-simplejwt==5.3.1
+django-filter==24.3
+
+# CORS y Seguridad
+django-cors-headers==4.7.0
+
+# Base de datos PostgreSQL
+psycopg2-binary==2.9.10
+
+# Servidor de produccion
+gunicorn==23.0.0
+uvicorn==0.32.1
+
+# Archivos estaticos
+whitenoise==6.9.0
+
+# Variables de entorno (CRITICO)
+python-dotenv==1.1.1
+
+# AWS S3 para archivos
+boto3==1.35.84
+django-storages==1.14.4
+
+# Pagos Stripe
+stripe==11.3.0
+
+# Generacion de PDFs
+reportlab==4.0.4
+pillow==11.1.0
+
+# Requests HTTP
+requests==2.32.5
+urllib3==2.5.0
 certifi==2025.8.3
 charset-normalizer==3.4.3
-Django==5.2.6
-django-cors-headers==4.7.0
-djangorestframework==3.16.1
-gunicorn==23.0.0
 idna==3.10
+
+# Utilidades
 packaging==25.0
-psycopg2-binary==2.9.10
-requests==2.32.5
-sqlparse==0.5.3
-typing_extensions==4.15.0
-tzdata==2025.2
-urllib3==2.5.0
-whitenoise==6.9.0
-djangorestframework-simplejwt==5.3.1
-reportlab==4.0.4
-uvicorn
-boto3
-stripe
