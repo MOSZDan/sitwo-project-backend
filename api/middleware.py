@@ -50,12 +50,30 @@ class TenantMiddleware(MiddlewareMixin):
     """
     Middleware para identificar y establecer el tenant/empresa actual.
     Prioridad de identificación:
-    1. Header HTTP X-Tenant-ID
-    2. Usuario autenticado (empresa del usuario)
-    3. Subdominio (futuro)
+    1. Header HTTP X-Tenant-Subdomain
+    2. Header HTTP X-Tenant-ID
+    3. Subdominio de la URL
+    4. Usuario autenticado (empresa del usuario)
+
+    IMPORTANTE: Los endpoints públicos (/api/public/*) NO requieren tenant.
     """
 
     def process_request(self, request):
+        # Excluir endpoints públicos del tenant middleware
+        path = request.path_info
+        public_paths = [
+            '/api/public/',
+            '/api/health/',
+            '/api/ping/',
+            '/api/db/',
+        ]
+
+        # Si es un endpoint público, no requerir tenant
+        if any(path.startswith(public_path) for public_path in public_paths):
+            request.tenant = None
+            request.tenant_id = None
+            return
+
         empresa = None
 
         # Opción 1: Por header HTTP X-Tenant-Subdomain (enviado desde frontend)

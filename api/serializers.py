@@ -405,6 +405,152 @@ class HistorialclinicoListSerializer(serializers.ModelSerializer):
         ]
 
 
+# =====================================
+# REGISTRO PÚBLICO DE EMPRESAS (SaaS)
+# =====================================
+
+from .models import Empresa
+import re
+
+class RegistroEmpresaSerializer(serializers.Serializer):
+    """
+    Serializador para el registro público de nuevas empresas (clientes SaaS).
+    Este endpoint NO requiere autenticación.
+    """
+    # Datos de la empresa
+    nombre_empresa = serializers.CharField(max_length=255)
+    subdomain = serializers.CharField(
+        max_length=100,
+        help_text="Subdominio único (ej: clinica-norte, dentcare)"
+    )
+
+    # Datos del usuario administrador
+    nombre_admin = serializers.CharField(max_length=255)
+    apellido_admin = serializers.CharField(max_length=255)
+    email_admin = serializers.EmailField()
+    telefono_admin = serializers.CharField(max_length=20, required=False, allow_blank=True)
+    sexo_admin = serializers.ChoiceField(
+        choices=['Masculino', 'Femenino', 'Otro'],
+        required=False,
+        allow_blank=True
+    )
+
+    def validate_subdomain(self, value):
+        """Valida que el subdominio sea único y tenga formato válido"""
+        # Convertir a minúsculas y limpiar
+        value = value.lower().strip()
+
+        # Validar formato: solo letras, números y guiones
+        if not re.match(r'^[a-z0-9-]+$', value):
+            raise serializers.ValidationError(
+                "El subdominio solo puede contener letras minúsculas, números y guiones."
+            )
+
+        # Validar longitud
+        if len(value) < 3:
+            raise serializers.ValidationError("El subdominio debe tener al menos 3 caracteres.")
+
+        if len(value) > 50:
+            raise serializers.ValidationError("El subdominio no puede tener más de 50 caracteres.")
+
+        # Validar que no empiece o termine con guión
+        if value.startswith('-') or value.endswith('-'):
+            raise serializers.ValidationError("El subdominio no puede empezar o terminar con guión.")
+
+        # Subdominios reservados
+        subdominios_reservados = [
+            'www', 'api', 'admin', 'app', 'blog', 'mail', 'ftp',
+            'localhost', 'server', 'ns1', 'ns2', 'smtp', 'pop',
+            'imap', 'webmail', 'email', 'portal', 'dashboard',
+            'sistema', 'test', 'dev', 'staging', 'prod', 'production'
+        ]
+
+        if value in subdominios_reservados:
+            raise serializers.ValidationError(
+                f"El subdominio '{value}' está reservado. Por favor elige otro."
+            )
+
+        # Validar que no exista en la BD
+        if Empresa.objects.filter(subdomain__iexact=value).exists():
+            raise serializers.ValidationError(
+                f"El subdominio '{value}' ya está en uso. Por favor elige otro."
+            )
+
+        return value
+
+    def validate_email_admin(self, value):
+        """Valida que el email del admin no esté registrado"""
+        value = value.lower().strip()
+
+        if Usuario.objects.filter(correoelectronico__iexact=value).exists():
+            raise serializers.ValidationError(
+                "Este correo electrónico ya está registrado en el sistema."
+            )
+
+        return value
+
+    def validate_nombre_empresa(self, value):
+        """Valida que el nombre de la empresa sea único"""
+        value = value.strip()
+
+        if len(value) < 3:
+            raise serializers.ValidationError("El nombre de la empresa debe tener al menos 3 caracteres.")
+
+        if Empresa.objects.filter(nombre__iexact=value).exists():
+            raise serializers.ValidationError(
+                f"Ya existe una empresa con el nombre '{value}'. Por favor usa otro nombre."
+            )
+
+        return value
+
+
+class ValidarSubdominioSerializer(serializers.Serializer):
+    """
+    Serializador para validar si un subdominio está disponible.
+    Usado por el frontend para validación en tiempo real.
+    """
+    subdomain = serializers.CharField(max_length=100)
+
+    def validate_subdomain(self, value):
+        """Valida formato y disponibilidad del subdominio"""
+        value = value.lower().strip()
+
+        # Validar formato
+        if not re.match(r'^[a-z0-9-]+$', value):
+            raise serializers.ValidationError(
+                "El subdominio solo puede contener letras minúsculas, números y guiones."
+            )
+
+        if len(value) < 3:
+            raise serializers.ValidationError("El subdominio debe tener al menos 3 caracteres.")
+
+        # Subdominios reservados
+        subdominios_reservados = [
+            'www', 'api', 'admin', 'app', 'blog', 'mail', 'ftp',
+            'localhost', 'server', 'ns1', 'ns2', 'smtp', 'pop'
+        ]
+
+        if value in subdominios_reservados:
+            raise serializers.ValidationError("Este subdominio está reservado.")
+
+        # Verificar disponibilidad
+        if Empresa.objects.filter(subdomain__iexact=value).exists():
+            raise serializers.ValidationError("Este subdominio ya está en uso.")
+
+        return value
+
+
+class EmpresaPublicSerializer(serializers.ModelSerializer):
+    """
+    Serializador público para mostrar información básica de empresas.
+    Solo incluye datos que pueden ser públicos.
+    """
+    class Meta:
+        model = Empresa
+        fields = ['id', 'nombre', 'subdomain', 'activo', 'fecha_creacion']
+        read_only_fields = ['id', 'fecha_creacion', 'activo']
+
+
 # api/serializers.py - Agregar al final del archivo existente
 
 from .models import Bitacora

@@ -25,6 +25,18 @@ class Empresa(models.Model):
         default=True,
         help_text="Indica si la empresa está activa en el sistema"
     )
+    stripe_customer_id = models.CharField(
+        max_length=255,
+        null=True,
+        blank=True,
+        help_text="ID del cliente en Stripe"
+    )
+    stripe_subscription_id = models.CharField(
+        max_length=255,
+        null=True,
+        blank=True,
+        help_text="ID de la suscripción en Stripe"
+    )
 
     class Meta:
         db_table = 'api_empresa'
