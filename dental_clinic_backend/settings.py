@@ -5,25 +5,23 @@ Django settings for dental_clinic_backend project.
 from pathlib import Path
 import os
 
-from dotenv import load_dotenv
-import dj_database_url
-
 # ------------------------------------
-# Paths / .env
+# Paths
 # ------------------------------------
 BASE_DIR = Path(__file__).resolve().parent.parent
-load_dotenv(BASE_DIR / ".env")
 
 # ------------------------------------
 # Seguridad / Debug
 # ------------------------------------
-SECRET_KEY = os.getenv("SECRET_KEY", "dev-only-not-secret")
-DEBUG = os.getenv("DEBUG", "False").lower() == "true"
+# IMPORTANTE: Usa variables de entorno en producción
+SECRET_KEY = os.environ.get('DJANGO_SECRET_KEY', "django-insecure-cambiar-en-produccion-tu-secret-key-aqui")
+DEBUG = os.environ.get('DEBUG', 'False') == 'True'  # Por defecto False en producción
 # ------------------------------------
 # Seguridad - Allowed Hosts / CORS / CSRF
 # ------------------------------------
 ALLOWED_HOSTS = [
     "localhost",
+    ".dpdns.org",
     "127.0.0.1",
     "3.137.195.59",
     "18.220.214.178",
@@ -32,9 +30,13 @@ ALLOWED_HOSTS = [
     "sitwo-project.onrender.com",
     "notificct.dpdns.org",
     "balancearin-1841542738.us-east-2.elb.amazonaws.com",
-    # Multi-tenancy: Permitir subdominios
-    ".localhost",  # Permite *.localhost (norte.localhost, sur.localhost, etc.)
-    ".notificct.dpdns.org",  # Permite *.notificct.dpdns.org en producción
+    ".localhost",
+    ".notificct.dpdns.org",
+]
+
+CORS_ALLOWED_ORIGIN_REGEXES = [
+    r"^https://\w+\.dpdns\.org$",  # Permite https://cualquier-subdominio.dpdns.org
+    r"^https://[\w-]+\.notificct\.dpdns\.org$",  # Subdominios de tenants
 ]
 
 # En desarrollo, permitir todos los orígenes (incluyendo subdominios)
@@ -44,8 +46,8 @@ else:
     # En producción, lista específica de orígenes permitidos
     CORS_ALLOWED_ORIGINS = [
         "https://sitwo-project.onrender.com",
-        "https://notificct.dpdns.org",
-        # Agregar subdominios específicos en producción si es necesario
+        "https://notificct.dpdns.org",  # Dominio público (landing page)
+        # Los subdominios de tenants se manejan por el regex de arriba
         "https://norte.notificct.dpdns.org",
         "https://sur.notificct.dpdns.org",
         "https://este.notificct.dpdns.org",
@@ -67,6 +69,7 @@ CSRF_TRUSTED_ORIGINS = [
     # Multi-tenancy: Permitir subdominios en producción
     "https://notificct.dpdns.org",
     "https://*.notificct.dpdns.org",
+    "https://*.dpdns.org"
 ]
 
 # ------------------------------------
@@ -101,7 +104,7 @@ MIDDLEWARE = [
     "django.contrib.messages.middleware.MessageMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
     "api.middleware.TenantMiddleware",  # Multi-tenancy: identificar empresa
-    "api.middleware.AuditMiddleware",    # Auditoría (después de TenantMiddleware)
+    "api.middleware.AuditMiddleware",  # Auditoría (después de TenantMiddleware)
 ]
 
 ROOT_URLCONF = "dental_clinic_backend.urls"
@@ -133,7 +136,7 @@ AWS_STORAGE_BUCKET_NAME = 'dentalclinicbackend'
 AWS_S3_SIGNATURE_NAME = 's3v4',
 AWS_S3_REGION_NAME = 'us-east-2'
 AWS_S3_FILE_OVERWRITE = False
-AWS_DEFAULT_ACL =  None
+AWS_DEFAULT_ACL = None
 AWS_S3_VERITY = True
 DEFAULT_FILE_STORAGE = 'storages.backends.s3boto3.S3Boto3Storage'
 
@@ -173,7 +176,7 @@ USE_TZ = True
 # Archivos estáticos (WhiteNoise)
 # ------------------------------------
 STATIC_URL = "/static/"
-STATIC_ROOT = os.path.join(BASE_DIR,'staticfiles')
+STATIC_ROOT = os.path.join(BASE_DIR, 'staticfiles')
 MEDIA_URLS = "/media/"
 MEDIA_ROOT = os.path.join(BASE_DIR, 'media')
 STATICFILES_STORAGE = "whitenoise.storage.CompressedManifestStaticFilesStorage"
@@ -204,42 +207,70 @@ DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 # ------------------------------------
 # Frontend y Email (para recuperar contraseña)
 # ------------------------------------
-FRONTEND_URL = os.getenv("FRONTEND_URL", "https://sitwo-project.onrender.com")
-DEFAULT_FROM_EMAIL = os.getenv("DEFAULT_FROM_EMAIL", "no-reply@clinica.local")
-
-EMAIL_BACKEND = os.getenv("EMAIL_BACKEND", "django.core.mail.backends.smtp.EmailBackend")
-EMAIL_HOST = os.getenv("EMAIL_HOST", "smtp.resend.com")
-EMAIL_PORT = int(os.getenv("EMAIL_PORT", "587"))
-EMAIL_HOST_USER = os.getenv("EMAIL_HOST_USER", "apikey")
-EMAIL_HOST_PASSWORD = os.getenv("EMAIL_HOST_PASSWORD", "")
-EMAIL_USE_TLS = os.getenv("EMAIL_USE_TLS", "True") == "True"
-EMAIL_USE_SSL = os.getenv("EMAIL_USE_SSL", "False") == "True"
-
+FRONTEND_URL = "https://sitwo-project.onrender.com"
+DEFAULT_FROM_EMAIL = "no-reply@clinica.local"
 
 # ------------------------------------
-# 🆕 CONFIGURACIÓN DE NOTIFICACIONES
+# SaaS Multi-Tenant Configuration
+# ------------------------------------
+# Dominio base para tenants (sin https://)
+SAAS_BASE_DOMAIN = "notificct.dpdns.org"
+
+# URL del sitio público (landing page de ventas)
+# Este es el dominio SIN subdominio donde los clientes se registran
+SAAS_PUBLIC_URL = f"https://{SAAS_BASE_DOMAIN}"
+
+# Ejemplo de URLs resultantes:
+# - Sitio público: https://notificct.dpdns.org
+# - Tenant "norte": https://norte.notificct.dpdns.org
+# - Tenant "sur": https://sur.notificct.dpdns.org
+
+# ------------------------------------
+# Configuración de Email (SMTP)
+# ------------------------------------
+EMAIL_BACKEND = "django.core.mail.backends.smtp.EmailBackend"
+EMAIL_HOST = "smtp.resend.com"  # Cambia esto por tu proveedor de email
+EMAIL_PORT = 587
+EMAIL_HOST_USER = "apikey"  # Usuario de tu servicio de email
+EMAIL_HOST_PASSWORD = ""  # IMPORTANTE: Agrega aquí tu API key de email
+EMAIL_USE_TLS = True
+EMAIL_USE_SSL = False
+
+# ------------------------------------
+# CONFIGURACIÓN DE NOTIFICACIONES
 # ------------------------------------
 
-# Push Notifications usando Supabase Edge Functions (alternativa a Firebase)
-ONESIGNAL_APP_ID = os.getenv("ONESIGNAL_APP_ID", "")
-ONESIGNAL_REST_API_KEY = os.getenv("ONESIGNAL_REST_API_KEY", "")
+# Push Notifications (OneSignal - Opcional)
+ONESIGNAL_APP_ID = ""  # Agrega tu OneSignal App ID aquí
+ONESIGNAL_REST_API_KEY = ""  # Agrega tu OneSignal REST API Key aquí
+
+# ------------------------------------
+# Stripe (Pagos SaaS - Opcional)
+# ------------------------------------
+STRIPE_PUBLIC_KEY = os.environ.get('STRIPE_PUBLIC_KEY', "pk_test_51SGSX5RxIhITCnEhwyPtoKa0LAWxHpMcr3Tw20Aqw9vkB8ncErHhIP1IvXmQjTdovbeQQMx55dGqiKqvTrJsjevj00Qd4GEebn")
+STRIPE_SECRET_KEY = os.environ.get('STRIPE_SECRET_KEY', "")  # IMPORTANTE: Agrega tu Stripe Secret Key como variable de entorno
+STRIPE_PRICE_ID = os.environ.get('STRIPE_PRICE_ID', "price_1SGVmoRxIhITCnEhEPfNBLzt")
+STRIPE_PRICE_AMOUNT = 99  # Precio en USD del plan mensual (solo para mostrar al usuario)
+STRIPE_CURRENCY = "usd"  # Moneda
+STRIPE_WEBHOOK_SECRET = ""  # Agrega tu webhook secret de Stripe
 
 # Configuración de notificaciones por email
-DEFAULT_REMINDER_HOURS = int(os.getenv("DEFAULT_REMINDER_HOURS", "24"))
-MAX_NOTIFICATION_RETRIES = int(os.getenv("MAX_NOTIFICATION_RETRIES", "3"))
-NOTIFICATION_RETRY_DELAY = int(os.getenv("NOTIFICATION_RETRY_DELAY", "30"))
+DEFAULT_REMINDER_HOURS = 24
+MAX_NOTIFICATION_RETRIES = 3
+NOTIFICATION_RETRY_DELAY = 30
 
 # Información de la clínica para emails
 CLINIC_INFO = {
-    'name': os.getenv("CLINIC_NAME", "Clínica Dental"),
-    'address': os.getenv("CLINIC_ADDRESS", "Santa Cruz, Bolivia"),
-    'phone': os.getenv("CLINIC_PHONE", "+591 XXXXXXXX"),
-    'email': os.getenv("CLINIC_EMAIL", "info@clinica.com"),
+    'name': "Clínica Dental",
+    'address': "Santa Cruz, Bolivia",
+    'phone': "+591 XXXXXXXX",
+    'email': "info@clinica.com",
     'website': FRONTEND_URL,
 }
 
 # Configuración de logging para notificaciones
 import os
+
 logs_dir = os.path.join(BASE_DIR, 'logs')
 if not os.path.exists(logs_dir):
     os.makedirs(logs_dir)
@@ -285,3 +316,20 @@ LOGGING = {
         },
     },
 }
+
+# ------------------------------------
+# Configuraciones de Seguridad para Producción
+# ------------------------------------
+if not DEBUG:
+    # HTTPS/SSL Settings
+    SECURE_SSL_REDIRECT = True
+    SESSION_COOKIE_SECURE = True
+    CSRF_COOKIE_SECURE = True
+    SECURE_HSTS_SECONDS = 31536000  # 1 año
+    SECURE_HSTS_INCLUDE_SUBDOMAINS = True
+    SECURE_HSTS_PRELOAD = True
+
+    # Security Headers
+    SECURE_CONTENT_TYPE_NOSNIFF = True
+    SECURE_BROWSER_XSS_FILTER = True
+    X_FRAME_OPTIONS = 'DENY'
