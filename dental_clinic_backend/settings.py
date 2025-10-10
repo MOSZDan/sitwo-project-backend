@@ -248,11 +248,11 @@ ONESIGNAL_REST_API_KEY = ""  # Agrega tu OneSignal REST API Key aquí
 # Stripe (Pagos SaaS - Opcional)
 # ------------------------------------
 STRIPE_PUBLIC_KEY = os.environ.get('STRIPE_PUBLIC_KEY', "pk_test_51SGSX5RxIhITCnEhwyPtoKa0LAWxHpMcr3Tw20Aqw9vkB8ncErHhIP1IvXmQjTdovbeQQMx55dGqiKqvTrJsjevj00Qd4GEebn")
-STRIPE_SECRET_KEY = os.environ.get('STRIPE_SECRET_KEY', "")  # IMPORTANTE: Agrega tu Stripe Secret Key como variable de entorno
+STRIPE_SECRET_KEY = os.environ.get('STRIPE_SECRET_KEY', "sk_test_51SGSX5RxIhITCnEhcPNiGfOpV4L9Pe1lNlryCgvqODk6Xk9gm3AqlDo6rTtoModZ0l6Hibn5XexCkATvJu2MAOCU00W3EreDIW")  # IMPORTANTE: Agrega tu Stripe Secret Key como variable de entorno
 STRIPE_PRICE_ID = os.environ.get('STRIPE_PRICE_ID', "price_1SGVmoRxIhITCnEhEPfNBLzt")
 STRIPE_PRICE_AMOUNT = 99  # Precio en USD del plan mensual (solo para mostrar al usuario)
 STRIPE_CURRENCY = "usd"  # Moneda
-STRIPE_WEBHOOK_SECRET = ""  # Agrega tu webhook secret de Stripe
+STRIPE_WEBHOOK_SECRET = "whsec_K2eUqq8TYTRgEsFrjjHUAkHunOVkkPyM"  # Agrega tu webhook secret de Stripe
 
 # Configuración de notificaciones por email
 DEFAULT_REMINDER_HOURS = 24
