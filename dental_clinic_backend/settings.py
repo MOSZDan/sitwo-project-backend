@@ -4,17 +4,19 @@ Django settings for dental_clinic_backend project.
 
 from pathlib import Path
 import os
+from dotenv import load_dotenv
 
-# ------------------------------------
-# Paths
-# ------------------------------------
+# Cargar variables de entorno desde archivo .env
 BASE_DIR = Path(__file__).resolve().parent.parent
-
+load_dotenv(os.path.join(BASE_DIR, '.env'))
 # ------------------------------------
 # Seguridad / Debug
 # ------------------------------------
 # IMPORTANTE: Usa variables de entorno en producción
-SECRET_KEY = os.environ.get('DJANGO_SECRET_KEY', "django-insecure-cambiar-en-produccion-tu-secret-key-aqui")
+SECRET_KEY = os.environ.get('DJANGO_SECRET_KEY')
+if not SECRET_KEY:
+    raise Exception("DJANGO_SECRET_KEY no está configurada en .env")
+
 DEBUG = os.environ.get('DEBUG', 'False') == 'True'  # Por defecto False en producción
 # ------------------------------------
 # Seguridad - Allowed Hosts / CORS / CSRF
@@ -130,9 +132,9 @@ WSGI_APPLICATION = "dental_clinic_backend.wsgi.application"
 # Base de datos (Configuración simplificada para Render + Supabase)
 # ------------------------------------
 
-AWS_ACCESS_KEY_ID = 'AKIAYF2ZN5QS4TV4QHE5'
-AWS_SECRET_ACCESS_KEY = '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'
-AWS_STORAGE_BUCKET_NAME = 'dentalclinicbackend'
+AWS_ACCESS_KEY_ID = os.environ.get('AWS_ACCESS_KEY_ID')
+AWS_SECRET_ACCESS_KEY = os.environ.get('AWS_SECRET_ACCESS_KEY')
+AWS_STORAGE_BUCKET_NAME = os.environ.get('AWS_STORAGE_BUCKET_NAME')
 AWS_S3_SIGNATURE_NAME = 's3v4',
 AWS_S3_REGION_NAME = 'us-east-2'
 AWS_S3_FILE_OVERWRITE = False
@@ -143,11 +145,11 @@ DEFAULT_FILE_STORAGE = 'storages.backends.s3boto3.S3Boto3Storage'
 DATABASES = {
     "default": {
         "ENGINE": "django.db.backends.postgresql",
-        "NAME": "clinicaldentt",
-        "USER": "postgres",
-        "PASSWORD": "pedritopicapiedra",
-        "HOST": "clinicadentalapp.ctwuseyooir4.us-east-2.rds.amazonaws.com",
-        "PORT": "5432",
+        "NAME": os.environ.get('DB_NAME'),
+        "USER": os.environ.get('DB_USER'),
+        "PASSWORD": os.environ.get('DB_PASSWORD'),
+        "HOST": os.environ.get('DB_HOST'),
+        "PORT": os.environ.get('DB_PORT', '5432'),
         "OPTIONS": {
             "sslmode": "require",
         },
@@ -247,12 +249,15 @@ ONESIGNAL_REST_API_KEY = ""  # Agrega tu OneSignal REST API Key aquí
 # ------------------------------------
 # Stripe (Pagos SaaS - Opcional)
 # ------------------------------------
-STRIPE_PUBLIC_KEY = os.environ.get('STRIPE_PUBLIC_KEY', "pk_test_51SGSX5RxIhITCnEhwyPtoKa0LAWxHpMcr3Tw20Aqw9vkB8ncErHhIP1IvXmQjTdovbeQQMx55dGqiKqvTrJsjevj00Qd4GEebn")
-STRIPE_SECRET_KEY = os.environ.get('STRIPE_SECRET_KEY', "sk_test_51SGSX5RxIhITCnEhcPNiGfOpV4L9Pe1lNlryCgvqODk6Xk9gm3AqlDo6rTtoModZ0l6Hibn5XexCkATvJu2MAOCU00W3EreDIW")  # IMPORTANTE: Agrega tu Stripe Secret Key como variable de entorno
-STRIPE_PRICE_ID = os.environ.get('STRIPE_PRICE_ID', "price_1SGVmoRxIhITCnEhEPfNBLzt")
+STRIPE_PUBLIC_KEY = os.environ.get('STRIPE_PUBLIC_KEY')
+STRIPE_SECRET_KEY = os.environ.get('STRIPE_SECRET_KEY')
+STRIPE_PRICE_ID = os.environ.get('STRIPE_PRICE_ID')
+
 STRIPE_PRICE_AMOUNT = 99  # Precio en USD del plan mensual (solo para mostrar al usuario)
 STRIPE_CURRENCY = "usd"  # Moneda
-STRIPE_WEBHOOK_SECRET = "whsec_K2eUqq8TYTRgEsFrjjHUAkHunOVkkPyM"  # Agrega tu webhook secret de Stripe
+STRIPE_WEBHOOK_SECRET = os.environ.get('STRIPE_WEBHOOK_SECRET')  # Agrega tu webhook secret de Stripe
+if not all([STRIPE_PUBLIC_KEY, STRIPE_SECRET_KEY, STRIPE_PRICE_ID]):
+    raise Exception("Configuración de Stripe incompleta en .env")
 
 # Configuración de notificaciones por email
 DEFAULT_REMINDER_HOURS = 24
