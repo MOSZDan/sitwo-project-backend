@@ -49,11 +49,16 @@ from .serializers import (
 # -------------------- Health / Utils --------------------
 
 def health(request):
-    """Ping de salud - Muestra información del tenant detectado"""
+    """
+    Ping de salud - Endpoint compatible con load balancers.
+    Retorna 200 OK siempre para health checks.
+    Muestra información del tenant detectado si está disponible.
+    """
     tenant = getattr(request, 'tenant', None)
 
     response_data = {
         "ok": True,
+        "status": "healthy",
         "tenant_detected": tenant is not None,
     }
 
@@ -65,9 +70,9 @@ def health(request):
             "activo": tenant.activo,
         }
     else:
-        response_data["message"] = "No se detectó ningún tenant"
+        response_data["message"] = "No se detectó ningún tenant (health check mode)"
 
-    return JsonResponse(response_data)
+    return JsonResponse(response_data, status=200)
 
 
 def db_health(request):
