@@ -27,6 +27,7 @@ ALLOWED_HOSTS = [
     "127.0.0.1",
     "3.137.195.59",
     "18.220.214.178",
+    "18.224.189.52",
     ".amazonaws.com",
     "ec2-18-220-214-178.us-east-2.compute.amazonaws.com",
     "sitwo-project.onrender.com",
@@ -327,7 +328,9 @@ LOGGING = {
 # ------------------------------------
 if not DEBUG:
     # HTTPS/SSL Settings
-    SECURE_SSL_REDIRECT = True
+    # IMPORTANTE: SECURE_SSL_REDIRECT deshabilitado para permitir health checks HTTP desde ALB
+    # El Load Balancer maneja HTTPS, pero hace health checks por HTTP
+    SECURE_SSL_REDIRECT = False  # Cambio: Deshabilitado para health checks
     SESSION_COOKIE_SECURE = True
     CSRF_COOKIE_SECURE = True
     SECURE_HSTS_SECONDS = 31536000  # 1 año
