@@ -35,11 +35,14 @@ ALLOWED_HOSTS = [
     "balancearin-1841542738.us-east-2.elb.amazonaws.com",
     ".localhost",
     ".notificct.dpdns.org",
+    # Vercel deployment
+    "buy-dental-smile.vercel.app",
 ]
 
 CORS_ALLOWED_ORIGIN_REGEXES = [
     r"^https://\w+\.dpdns\.org$",  # Permite https://cualquier-subdominio.dpdns.org
     r"^https://[\w-]+\.notificct\.dpdns\.org$",  # Subdominios de tenants
+    r"^https://[\w-]+\.vercel\.app$",  # Vercel deployments
 ]
 
 # En desarrollo, permitir todos los orígenes (incluyendo subdominios)
@@ -54,6 +57,8 @@ else:
         "https://norte.notificct.dpdns.org",
         "https://sur.notificct.dpdns.org",
         "https://este.notificct.dpdns.org",
+        # Vercel frontend
+        "https://buy-dental-smile.vercel.app",
     ]
 
 CORS_ALLOW_CREDENTIALS = True
@@ -72,7 +77,10 @@ CSRF_TRUSTED_ORIGINS = [
     # Multi-tenancy: Permitir subdominios en producción
     "https://notificct.dpdns.org",
     "https://*.notificct.dpdns.org",
-    "https://*.dpdns.org"
+    "https://*.dpdns.org",
+    # Vercel frontend
+    "https://buy-dental-smile.vercel.app",
+    "https://*.vercel.app",
 ]
 
 # ------------------------------------
