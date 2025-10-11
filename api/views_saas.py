@@ -132,8 +132,7 @@ def registrar_empresa(request):
 
             # 6. Enviar email de bienvenida con credenciales
             try:
-                dominio_base = settings.FRONTEND_URL.replace('https://', '').replace('http://', '')
-                url_acceso = f"https://{empresa.subdomain}.{dominio_base}"
+                url_acceso = f"https://{empresa.subdomain}.{settings.SAAS_BASE_DOMAIN}"
 
                 subject = f"¡Bienvenido a {settings.CLINIC_INFO.get('name', 'Nuestro Sistema')}!"
                 message = f"""
@@ -191,7 +190,7 @@ Equipo de {settings.CLINIC_INFO.get('name', 'Soporte')}
                     "apellido": usuario_admin.apellido,
                     "email": usuario_admin.correoelectronico
                 },
-                "url_acceso": f"https://{empresa.subdomain}.{dominio_base}",
+                "url_acceso": url_acceso,
                 "password_temporal": password_temporal,
                 "email_enviado": email_enviado,
                 "instrucciones": "Revisa tu correo electrónico para las credenciales de acceso. Si no lo recibes, guarda la contraseña temporal mostrada aquí."
