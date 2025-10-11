@@ -43,6 +43,7 @@ CORS_ALLOWED_ORIGIN_REGEXES = [
     r"^https://\w+\.dpdns\.org$",  # Permite https://cualquier-subdominio.dpdns.org
     r"^https://[\w-]+\.notificct\.dpdns\.org$",  # Subdominios de tenants
     r"^https://[\w-]+\.vercel\.app$",  # Vercel deployments
+    r"^http://localhost:\d+$",  # Desarrollo local en cualquier puerto
 ]
 
 # En desarrollo, permitir todos los orígenes (incluyendo subdominios)
