@@ -183,56 +183,39 @@ class TipodeusuarioSerializer(serializers.ModelSerializer):
         fields = ("identificacion", "rol", "descripcion")
 
 
-# serializers.py
-from django.db.models import Q
-from rest_framework import serializers
-from .models import Usuario, Tipodeusuario
-
 class UsuarioAdminSerializer(serializers.ModelSerializer):
     rol = serializers.CharField(source="idtipousuario.rol", read_only=True)
-
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        request = self.context.get('request')
-
-        qs = Tipodeusuario.objects.all()
-        # Mostrar SOLO roles del tenant + globales (empresa IS NULL)
-        if request and hasattr(request, 'tenant') and request.tenant:
-            emp = request.tenant
-            qs = qs.filter(Q(empresa=emp) | Q(empresa__isnull=True))
-
-        self.fields['idtipousuario'] = serializers.PrimaryKeyRelatedField(
-            queryset=qs, required=False
-        )
+    idtipousuario = serializers.PrimaryKeyRelatedField(
+        queryset=Tipodeusuario.objects.all(), required=False
+    )
 
     class Meta:
         model = Usuario
-        fields = ("codigo", "nombre", "apellido", "correoelectronico", "idtipousuario", "rol")
+        fields = (
+            "codigo",
+            "nombre",
+            "apellido",
+            "correoelectronico",
+            "idtipousuario",
+            "rol",
+        )
+    # 'codigo' viene de BD/negocio, lo dejamos de solo lectura si así lo manejan
         read_only_fields = ("codigo",)
 
     def update(self, instance, validated_data):
         new_role = validated_data.get("idtipousuario")
-
-        # 1) No permitir asignar un rol de OTRA empresa (roles globales sí valen)
-        if new_role and new_role.empresa_id not in (None, instance.empresa_id):
-            raise serializers.ValidationError("El rol pertenece a otra empresa.")
-
-        # 2) Regla opcional: no remover al último Administrador de la empresa
-        was_admin = bool(instance.idtipousuario and instance.idtipousuario.rol.strip().lower() == 'administrador')
-        will_be_admin = bool(new_role and new_role.rol.strip().lower() == 'administrador')
-
-        if was_admin and not will_be_admin:
-            remaining = (
+        if new_role and instance.idtipousuario_id == 1 and new_role.id != 1:
+            remaining_admins = (
                 Usuario.objects
-                .filter(empresa=instance.empresa, idtipousuario__rol__iexact='Administrador')
+                .filter(idtipousuario_id=1)
                 .exclude(pk=instance.pk)
                 .count()
             )
-            if remaining == 0:
-                raise serializers.ValidationError("No puedes remover el último administrador de la empresa.")
-
+            if remaining_admins == 0:
+                raise serializers.ValidationError(
+                    "No puedes remover el último administrador del sistema."
+                )
         return super().update(instance, validated_data)
-
 
 
 class UserNotificationSettingsSerializer(serializers.ModelSerializer):

@@ -37,7 +37,27 @@ ALLOWED_HOSTS = [
     ".notificct.dpdns.org",
     # Vercel deployment
     "buy-dental-smile.vercel.app",
+    # Desarrollo móvil
+    "10.0.2.2",  # Emulador Android
+    "10.0.3.2",  # Emulador Android (alternativo)
 ]
+
+# En desarrollo, permitir también IPs de red local (192.168.*.*)
+if DEBUG:
+    import socket
+    # Obtener IP local automáticamente
+    try:
+        hostname = socket.gethostname()
+        local_ip = socket.gethostbyname(hostname)
+        if local_ip not in ALLOWED_HOSTS:
+            ALLOWED_HOSTS.append(local_ip)
+    except:
+        pass
+    # Permitir rango común de red local
+    ALLOWED_HOSTS.extend([
+        "192.168.1.1", "192.168.1.2", "192.168.1.3", "192.168.1.4", "192.168.1.5",
+        "192.168.0.1", "192.168.0.2", "192.168.0.3", "192.168.0.4", "192.168.0.5",
+    ])
 
 CORS_ALLOWED_ORIGIN_REGEXES = [
     r"^https://\w+\.dpdns\.org$",  # Permite https://cualquier-subdominio.dpdns.org
@@ -117,6 +137,7 @@ MIDDLEWARE = [
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
     "api.middleware.TenantMiddleware",  # Multi-tenancy: identificar empresa
     "api.middleware.AuditMiddleware",  # Auditoría (después de TenantMiddleware)
+
 ]
 
 ROOT_URLCONF = "dental_clinic_backend.urls"
