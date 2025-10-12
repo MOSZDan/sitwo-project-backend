@@ -4,7 +4,6 @@ from django.contrib.auth import get_user_model
 from django.db import connection
 from django.core.mail import send_mail
 from django.conf import settings
-from django.http import JsonResponse
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_http_methods
 from django.db.models import Q
@@ -12,6 +11,7 @@ from django.utils.timezone import make_aware
 from datetime import datetime, timedelta
 import csv
 from io import BytesIO
+import os
 
 from rest_framework import status
 from rest_framework.generics import RetrieveUpdateAPIView
@@ -20,15 +20,14 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.filters import SearchFilter, OrderingFilter
 from rest_framework.response import Response
 from rest_framework.decorators import action
-from rest_framework import viewsets, mixins
+from rest_framework import mixins
 from rest_framework.viewsets import GenericViewSet
 from django_filters.rest_framework import DjangoFilterBackend
 
 from .models import (
     Paciente, Consulta, Odontologo, Horario, Tipodeconsulta,
-    Usuario, Tipodeusuario, Bitacora, Historialclinico  # Quitado Vista
+    Usuario, Tipodeusuario, Bitacora, Historialclinico
 )
-
 from .serializers import (
     PacienteSerializer,
     ConsultaSerializer,
@@ -42,10 +41,8 @@ from .serializers import (
     BitacoraSerializer,
     ReprogramarConsultaSerializer,
     HistorialclinicoCreateSerializer,
-    HistorialclinicoListSerializer
+    HistorialclinicoListSerializer,
 )
-
-
 # -------------------- Health / Utils --------------------
 
 def health(request):
@@ -142,16 +139,33 @@ def users_count(request):
 
 
 # Helper reutilizable: ¿el usuario actual es admin en la tabla de negocio?
-def _es_admin_por_tabla(dj_user) -> bool:
-    email = (getattr(dj_user, "email", None) or getattr(dj_user, "username", "")).strip().lower()
+def _tenant(request):
+    """Obtiene el tenant desde el middleware (request.tenant o None)."""
+    return getattr(request, "tenant", None)
+
+def _es_admin_por_tabla(request) -> bool:
+    """
+    ¿El usuario autenticado es rol 'Administrador' EN SU EMPRESA?
+    Compara por nombre de rol (no por id) y misma empresa que el tenant.
+    """
+    t = _tenant(request)
+    if not t or not request.user or not request.user.is_authenticated:
+        return False
+
+    email = (getattr(request.user, "email", None) or getattr(request.user, "username", "")).strip().lower()
     if not email:
         return False
-    return Usuario.objects.filter(
-        correoelectronico__iexact=email,
-        idtipousuario_id=1  # 1 = Administrador
-    ).exists()
 
+    try:
+        u = Usuario.objects.select_related("idtipousuario").get(correoelectronico__iexact=email)
+    except Usuario.DoesNotExist:
+        return False
 
+    return (
+        u.empresa_id == t.id and
+        u.idtipousuario is not None and
+        (u.idtipousuario.rol or "").strip().lower() == "administrador"
+    )
 # -------------------- Pacientes --------------------
 
 #class PacienteViewSet(ReadOnlyModelViewSet):
@@ -497,15 +511,14 @@ class TipodeusuarioViewSet(ReadOnlyModelViewSet):
     pagination_class = None
 
     def get_queryset(self):
-        """Filtra tipos de usuario por empresa (multi-tenancy)"""
-        queryset = Tipodeusuario.objects.all().order_by("id")
-
-        # Filtrar por tenant si está disponible
-        if hasattr(self.request, 'tenant') and self.request.tenant:
-            queryset = queryset.filter(empresa=self.request.tenant)
-
-        return queryset
-
+        """
+        Devuelve roles de la EMPRESA actual y también roles globales (empresa IS NULL).
+        """
+        qs = Tipodeusuario.objects.all().order_by("id")
+        t = _tenant(self.request)
+        if t:
+            qs = qs.filter(Q(empresa=t) | Q(empresa__isnull=True))
+        return qs
 
 class UsuarioViewSet(ModelViewSet):
     permission_classes = [IsAuthenticated]
@@ -529,19 +542,10 @@ class UsuarioViewSet(ModelViewSet):
         return queryset
 
     def partial_update(self, request, *args, **kwargs):
-        """
-        Autorización: solo administradores pueden cambiar roles.
-        Admin = user.is_staff OR Usuario.idtipousuario_id == 1 (buscando por email/username).
-        """
-        user = request.user
-        is_staff = getattr(user, "is_staff", False)
-        es_admin_tabla = _es_admin_por_tabla(user)
-
-        if not (is_staff or es_admin_tabla):
+        # Solo administradores del tenant (o staff) pueden cambiar roles
+        if not (_es_admin_por_tabla(request) or getattr(request.user, "is_staff", False)):
             return Response({"detail": "Solo administradores pueden cambiar roles."}, status=403)
-
         return super().partial_update(request, *args, **kwargs)
-
 
 
 def ping(_):
