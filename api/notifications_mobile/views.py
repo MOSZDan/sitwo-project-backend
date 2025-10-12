@@ -191,11 +191,17 @@ class MobileRegisterDeviceView(APIView):
 @csrf_exempt
 @api_view(["POST"])
 @permission_classes([AllowAny])
+@authentication_classes([])   # sin auth, SIN variables nuevas
 def mobile_dispatch_notification(request, pk: int):
     """
     Ejecuta una notificación PENDIENTE (si fecha_envio <= now).
+    SOLO PUSH (idcanalnotificacion=1). Sin secretos.
     """
-    obj = HistorialNotificacionMN.objects.filter(id=pk, estado="PENDIENTE").first()
+    obj = HistorialNotificacionMN.objects.filter(
+        id=pk,
+        estado="PENDIENTE",
+        idcanalnotificacion=1,   # <<< SOLO PUSH
+    ).first()
     if not obj:
         return Response({"detail": "not-found-or-not-pending"}, status=status.HTTP_404_NOT_FOUND)
 
@@ -206,20 +212,23 @@ def mobile_dispatch_notification(request, pk: int):
     data = obj.datos_adicionales or {}
     codusuario = obj.codusuario or data.get("paciente_codusuario")
 
-    tokens = list(
+    devices = list(
         DispositivoMovilMN.objects.filter(codusuario=codusuario, activo=True)
         .exclude(token_fcm__isnull=True)
         .exclude(token_fcm="")
-        .values_list("token_fcm", flat=True)
+        .order_by("-ultima_actividad")
     )
+    tokens = list(dict.fromkeys([d.token_fcm for d in devices]))
 
     try:
         res = mobile_send_push_fcm(tokens, obj.titulo, obj.mensaje, data)
+        device_id = devices[0].id if devices else None
         HistorialNotificacionMN.objects.filter(id=obj.id).update(
             estado="ENVIADO",
-            fecha_entrega=now,            # usamos como “enviado”
+            fecha_entrega=now,
             intentos=F("intentos") + 1,
             error_mensaje="",
+            iddispositivomovil=device_id,   # <<< guarda el dispositivo usado
         )
         return Response({"sent_to": len(tokens), "res": res}, status=status.HTTP_200_OK)
     except Exception as e:
@@ -232,157 +241,74 @@ def mobile_dispatch_notification(request, pk: int):
 
 
 # --- NUEVO: despachar todas las notificaciones vencidas en lote ---
+@csrf_exempt
 @api_view(["POST"])
 @permission_classes([AllowAny])
+@authentication_classes([])   # sin auth, SIN variables nuevas
 def mobile_dispatch_due(request):
     """
-    Despacha hasta 200 notificaciones PENDIENTE con fecha_envio <= ahora.
-    Sin secretos, sin auth, pensado para pruebas locales y para Lambda simple.
+    Envia todas las notificaciones PUSH pendientes (fecha_envio <= now).
+    Filtra SOLO idcanalnotificacion=1. Límite 200 por corrida.
     """
-    from django.utils import timezone
-    from .models import HistorialNotificacionMN, DispositivoMovilMN
-    from .utils import mobile_send_push_fcm
-
     now = timezone.now()
-    # límite de 200 por tanda
-    pendientes = (
-        HistorialNotificacionMN.objects
-        .filter(estado="PENDIENTE", fecha_envio__lte=now)
-        .order_by("id")[:200]
+    pendientes = list(
+        HistorialNotificacionMN.objects.filter(
+            estado="PENDIENTE",
+            idcanalnotificacion=1,     # <<< SOLO PUSH
+            fecha_envio__lte=now
+        )
+        .order_by("fecha_envio")[:200]
     )
 
-    total = pendientes.count()
-    enviados = 0
-    errores = 0
-    procesados = []
+    total = len(pendientes)
+    sent = 0
+    skipped = 0
+    errors = 0
 
     for obj in pendientes:
         data = obj.datos_adicionales or {}
         codusuario = obj.codusuario or data.get("paciente_codusuario")
 
-        # 1 dispositivo activo por usuario (tu requerimiento)
-        dev = (
-            DispositivoMovilMN.objects
-            .filter(codusuario=codusuario, activo=True)
+        devices = list(
+            DispositivoMovilMN.objects.filter(codusuario=codusuario, activo=True)
             .exclude(token_fcm__isnull=True)
             .exclude(token_fcm="")
             .order_by("-ultima_actividad")
-            .first()
         )
-        tokens = [dev.token_fcm] if dev else []
+        tokens = list(dict.fromkeys([d.token_fcm for d in devices]))
 
-        try:
-            # Envía push (usa tus credenciales FCM existentes)
-            mobile_send_push_fcm(tokens, obj.titulo, obj.mensaje, data)
-
-            # Marca como ENVIADO y rellena iddispositivomovil si lo tenemos
-            obj.estado = "ENVIADO"
-            obj.fecha_entrega = now
-            obj.intentos = (obj.intentos or 0) + 1
-            obj.error_mensaje = ""
-            if dev:
-                obj.iddispositivomovil = dev.id
-            obj.save(update_fields=[
-                "estado", "fecha_entrega", "intentos", "error_mensaje", "iddispositivomovil"
-            ])
-
-            enviados += 1
-            procesados.append(obj.id)
-        except Exception as e:
-            # Marca ERROR, guardando el último mensaje
-            obj.estado = "ERROR"
-            obj.intentos = (obj.intentos or 0) + 1
-            obj.error_mensaje = str(e)[:1000]
-            if dev:
-                obj.iddispositivomovil = dev.id
-            obj.save(update_fields=[
-                "estado", "intentos", "error_mensaje", "iddispositivomovil"
-            ])
-            errores += 1
-            procesados.append(obj.id)
-
-    return Response({
-        "total_due": total,
-        "sent": enviados,
-        "errors": errores,
-        "processed_ids": procesados,
-    }, status=status.HTTP_200_OK)
-
-
-# --- NUEVO: Vista de clase para despacho en lote más robusta ---
-from django.conf import settings
-
-class MobileDispatchDueView(APIView):
-    """
-    Despacha en lote notificaciones PENDIENTES con fecha_envio <= ahora.
-    - En DEBUG: no requiere auth.
-    - En prod: si defines NOTIF_DISPATCH_SECRET, envía header X-Notif-Secret.
-    Límite por corrida: ?max=200 (default 200).
-    """
-    permission_classes = [permissions.AllowAny]  # no CSRF para clientes server-to-server
-
-    @method_decorator(csrf_exempt)
-    def post(self, request):
-        # seguridad simple: en prod, si hay secreto definido, verifica header
-        secret_required = getattr(settings, "NOTIF_DISPATCH_SECRET", None)
-        if not settings.DEBUG and secret_required:
-            if request.headers.get("X-Notif-Secret") != secret_required:
-                return Response({"detail": "forbidden"}, status=status.HTTP_403_FORBIDDEN)
-
-        try:
-            max_count = int(request.query_params.get("max", "200"))
-        except Exception:
-            max_count = 200
-        max_count = max(1, min(max_count, 500))  # hard cap 500
-
-        now = timezone.now()
-        qs = (
-            HistorialNotificacionMN.objects
-            .filter(estado="PENDIENTE", fecha_envio__lte=now)
-            .order_by("id")[:max_count]
-        )
-
-        sent, errors = 0, 0
-        results = []
-
-        for obj in qs:
-            data = obj.datos_adicionales or {}
-            codusuario = obj.codusuario or data.get("paciente_codusuario")
-
-            # único dispositivo activo -> resolvemos tokens y guardamos id
-            device = (
-                DispositivoMovilMN.objects
-                .filter(codusuario=codusuario, activo=True)
-                .order_by("-ultima_actividad")
-                .first()
+        if not tokens:
+            skipped += 1
+            HistorialNotificacionMN.objects.filter(id=obj.id).update(
+                estado="ERROR",
+                intentos=F("intentos") + 1,
+                error_mensaje="sin tokens activos",
             )
-            tokens = []
-            if device and device.token_fcm:
-                tokens = [device.token_fcm]
+            continue
 
-            try:
-                res = mobile_send_push_fcm(tokens, obj.titulo, obj.mensaje, data)
-                # marcamos como ENVIADO; guardamos iddispositivomovil que usamos
-                HistorialNotificacionMN.objects.filter(id=obj.id).update(
-                    estado="ENVIADO",
-                    fecha_entrega=now,
-                    intentos=F("intentos") + 1,
-                    error_mensaje="",
-                    iddispositivomovil=(device.id if device else None),
-                )
-                sent += 1
-                results.append({"id": obj.id, "sent_to": len(tokens)})
-            except Exception as e:
-                HistorialNotificacionMN.objects.filter(id=obj.id).update(
-                    estado="ERROR",
-                    intentos=F("intentos") + 1,
-                    error_mensaje=str(e)[:1000],
-                    iddispositivomovil=(device.id if device else None),
-                )
-                errors += 1
-                results.append({"id": obj.id, "error": str(e)})
+        try:
+            mobile_send_push_fcm(tokens, obj.titulo, obj.mensaje, data)
+            device_id = devices[0].id if devices else None
+            HistorialNotificacionMN.objects.filter(id=obj.id).update(
+                estado="ENVIADO",
+                fecha_entrega=now,
+                intentos=F("intentos") + 1,
+                error_mensaje="",
+                iddispositivomovil=device_id,   # <<< guarda el dispositivo usado
+            )
+            sent += 1
+        except Exception as e:
+            errors += 1
+            HistorialNotificacionMN.objects.filter(id=obj.id).update(
+                estado="ERROR",
+                intentos=F("intentos") + 1,
+                error_mensaje=str(e)[:1000],
+            )
 
-        return Response(
-            {"ok": True, "processed": len(qs), "sent": sent, "errors": errors, "items": results},
-            status=status.HTTP_200_OK
-        )
+    return Response(
+        {"ok": True, "total": total, "sent": sent, "skipped": skipped, "errors": errors},
+        status=status.HTTP_200_OK
+    )
+
+
+# Clase eliminada - usamos la función mobile_dispatch_due más simple arriba
