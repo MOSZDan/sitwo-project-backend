@@ -4,6 +4,7 @@ from django.contrib.auth import get_user_model
 from django.db import connection
 from django.core.mail import send_mail
 from django.conf import settings
+from django.http import JsonResponse
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_http_methods
 from django.db.models import Q
@@ -12,7 +13,6 @@ from datetime import datetime, timedelta
 import csv
 from io import BytesIO
 import os
-
 from rest_framework import status
 from rest_framework.generics import RetrieveUpdateAPIView
 from rest_framework.viewsets import ModelViewSet, ReadOnlyModelViewSet
@@ -20,14 +20,15 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.filters import SearchFilter, OrderingFilter
 from rest_framework.response import Response
 from rest_framework.decorators import action
-from rest_framework import mixins
+from rest_framework import viewsets, mixins
 from rest_framework.viewsets import GenericViewSet
 from django_filters.rest_framework import DjangoFilterBackend
 
 from .models import (
     Paciente, Consulta, Odontologo, Horario, Tipodeconsulta,
-    Usuario, Tipodeusuario, Bitacora, Historialclinico
+    Usuario, Tipodeusuario, Bitacora, Historialclinico  # Quitado Vista
 )
+
 from .serializers import (
     PacienteSerializer,
     ConsultaSerializer,
@@ -41,8 +42,10 @@ from .serializers import (
     BitacoraSerializer,
     ReprogramarConsultaSerializer,
     HistorialclinicoCreateSerializer,
-    HistorialclinicoListSerializer,
+    HistorialclinicoListSerializer
 )
+
+
 # -------------------- Health / Utils --------------------
 
 def health(request):
@@ -155,17 +158,18 @@ def _es_admin_por_tabla(request) -> bool:
     email = (getattr(request.user, "email", None) or getattr(request.user, "username", "")).strip().lower()
     if not email:
         return False
-
     try:
         u = Usuario.objects.select_related("idtipousuario").get(correoelectronico__iexact=email)
     except Usuario.DoesNotExist:
         return False
 
     return (
-        u.empresa_id == t.id and
-        u.idtipousuario is not None and
-        (u.idtipousuario.rol or "").strip().lower() == "administrador"
+            u.empresa_id == t.id and
+            u.idtipousuario is not None and
+            (u.idtipousuario.rol or "").strip().lower() == "administrador"
     )
+
+
 # -------------------- Pacientes --------------------
 
 #class PacienteViewSet(ReadOnlyModelViewSet):
@@ -457,35 +461,106 @@ class HorarioViewSet(ReadOnlyModelViewSet):
         Obtiene horarios disponibles para una fecha y odontólogo específicos.
         Parámetros: fecha (YYYY-MM-DD), odontologo_id
         """
+        import logging
+        from datetime import datetime as dt
+
+        logger = logging.getLogger(__name__)
+
+        # 1. OBTENER PARÁMETROS
         fecha = request.query_params.get('fecha')
         odontologo_id = request.query_params.get('odontologo_id')
 
+        # Log de parámetros recibidos
+        logger.info(f"[Horarios Disponibles] Parámetros recibidos - fecha: '{fecha}', odontologo_id: '{odontologo_id}'")
+
+        # Validar que existan los parámetros
         if not fecha or not odontologo_id:
+            logger.warning(f"[Horarios Disponibles] Parámetros faltantes - fecha: {fecha}, odontologo_id: {odontologo_id}")
             return Response(
                 {"detail": "Se requieren los parámetros 'fecha' y 'odontologo_id'."},
                 status=status.HTTP_400_BAD_REQUEST
             )
 
-        # Obtener todos los horarios del tenant
-        todos_horarios = self.get_queryset()
+        # 2. VALIDAR FORMATO DE FECHA
+        try:
+            # Intentar parsear la fecha en formato YYYY-MM-DD
+            fecha_obj = dt.strptime(fecha, '%Y-%m-%d').date()
+            logger.info(f"[Horarios Disponibles] Fecha parseada correctamente: {fecha_obj}")
+        except ValueError as e:
+            logger.error(f"[Horarios Disponibles] Error al parsear fecha '{fecha}': {str(e)}")
+            return Response(
+                {
+                    "detail": f"Formato de fecha inválido. Se esperaba YYYY-MM-DD pero se recibió '{fecha}'.",
+                    "error": str(e)
+                },
+                status=status.HTTP_400_BAD_REQUEST
+            )
 
-        # Filtrar horarios ocupados para ese odontólogo en esa fecha (mismo tenant)
-        horarios_ocupados_query = Consulta.objects.filter(
-            cododontologo_id=odontologo_id,
-            fecha=fecha
-        )
+        # 3. VERIFICAR TENANT
+        tenant_detected = hasattr(request, 'tenant') and request.tenant
+        logger.info(f"[Horarios Disponibles] Tenant detectado: {tenant_detected}")
+        if tenant_detected:
+            logger.info(f"[Horarios Disponibles] Tenant: {request.tenant.nombre} (ID: {request.tenant.id})")
+        else:
+            logger.warning(f"[Horarios Disponibles] No se detectó tenant para el usuario: {request.user}")
 
-        # Filtrar por tenant
-        if hasattr(request, 'tenant') and request.tenant:
-            horarios_ocupados_query = horarios_ocupados_query.filter(empresa=request.tenant)
+        # 4. OBTENER HORARIOS DEL TENANT
+        try:
+            todos_horarios = self.get_queryset()
+            count_horarios = todos_horarios.count()
+            logger.info(f"[Horarios Disponibles] Total horarios encontrados: {count_horarios}")
 
-        horarios_ocupados = horarios_ocupados_query.values_list('idhorario_id', flat=True)
+            # Si no hay horarios, puede ser problema de tenant
+            if count_horarios == 0:
+                error_msg = "No hay horarios configurados."
+                if not tenant_detected:
+                    error_msg += " Además, no se detectó el tenant. Verifica la configuración de tu clínica."
+                logger.error(f"[Horarios Disponibles] {error_msg}")
+                return Response(
+                    {"detail": error_msg, "tenant_detected": tenant_detected},
+                    status=status.HTTP_404_NOT_FOUND
+                )
+        except Exception as e:
+            logger.error(f"[Horarios Disponibles] Error al obtener horarios del tenant: {str(e)}")
+            return Response(
+                {"detail": f"Error al consultar horarios: {str(e)}"},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
 
-        # Horarios disponibles = todos - ocupados
-        horarios_disponibles = todos_horarios.exclude(id__in=horarios_ocupados)
+        # 5. FILTRAR HORARIOS OCUPADOS
+        try:
+            horarios_ocupados_query = Consulta.objects.filter(
+                cododontologo_id=odontologo_id,
+                fecha=fecha_obj  # Usar objeto date en lugar de string
+            )
 
-        serializer = self.get_serializer(horarios_disponibles, many=True)
-        return Response(serializer.data, status=status.HTTP_200_OK)
+            # Filtrar por tenant
+            if tenant_detected:
+                horarios_ocupados_query = horarios_ocupados_query.filter(empresa=request.tenant)
+
+            horarios_ocupados = horarios_ocupados_query.values_list('idhorario_id', flat=True)
+            logger.info(f"[Horarios Disponibles] Horarios ocupados IDs: {list(horarios_ocupados)}")
+        except Exception as e:
+            logger.error(f"[Horarios Disponibles] Error al filtrar horarios ocupados: {str(e)}")
+            return Response(
+                {"detail": f"Error al consultar horarios ocupados: {str(e)}"},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+
+        # 6. CALCULAR HORARIOS DISPONIBLES
+        try:
+            horarios_disponibles = todos_horarios.exclude(id__in=horarios_ocupados)
+            count_disponibles = horarios_disponibles.count()
+            logger.info(f"[Horarios Disponibles] Horarios disponibles: {count_disponibles}")
+
+            serializer = self.get_serializer(horarios_disponibles, many=True)
+            return Response(serializer.data, status=status.HTTP_200_OK)
+        except Exception as e:
+            logger.error(f"[Horarios Disponibles] Error al serializar horarios: {str(e)}")
+            return Response(
+                {"detail": f"Error al procesar horarios disponibles: {str(e)}"},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
 
 
 class TipodeconsultaViewSet(ReadOnlyModelViewSet):
@@ -511,14 +586,12 @@ class TipodeusuarioViewSet(ReadOnlyModelViewSet):
     pagination_class = None
 
     def get_queryset(self):
-        """
-        Devuelve roles de la EMPRESA actual y también roles globales (empresa IS NULL).
-        """
         qs = Tipodeusuario.objects.all().order_by("id")
         t = _tenant(self.request)
         if t:
             qs = qs.filter(Q(empresa=t) | Q(empresa__isnull=True))
         return qs
+
 
 class UsuarioViewSet(ModelViewSet):
     permission_classes = [IsAuthenticated]
@@ -542,23 +615,12 @@ class UsuarioViewSet(ModelViewSet):
         return queryset
 
     def partial_update(self, request, *args, **kwargs):
-        # Solo administradores del tenant (o staff) pueden cambiar roles
         if not (_es_admin_por_tabla(request) or getattr(request.user, "is_staff", False)):
             return Response({"detail": "Solo administradores pueden cambiar roles."}, status=403)
+
         return super().partial_update(request, *args, **kwargs)
 
-    @action(detail=False, methods=['get'], url_path='por-roles')
-    def por_roles(self, request):
-        # /api/usuarios/por-roles/?ids=1,3,4
-        ids_param = request.query_params.get('ids', '')
-        try:
-            ids = [int(x) for x in ids_param.split(',') if x.strip()]
-        except ValueError:
-            return Response({"detail": "Parámetro 'ids' inválido"}, status=400)
 
-        qs = self.get_queryset().filter(idtipousuario_id__in=ids).order_by('apellido', 'nombre')
-        data = UsuarioAdminSerializer(qs, many=True).data
-        return Response(data)
 
 def ping(_):
     return JsonResponse({"ok": True})

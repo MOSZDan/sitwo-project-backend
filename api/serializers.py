@@ -183,11 +183,6 @@ class TipodeusuarioSerializer(serializers.ModelSerializer):
         fields = ("identificacion", "rol", "descripcion")
 
 
-# serializers.py
-from django.db.models import Q
-from rest_framework import serializers
-from .models import Usuario, Tipodeusuario
-
 class UsuarioAdminSerializer(serializers.ModelSerializer):
     rol = serializers.CharField(source="idtipousuario.rol", read_only=True)
 
@@ -208,21 +203,19 @@ class UsuarioAdminSerializer(serializers.ModelSerializer):
     class Meta:
         model = Usuario
         fields = ("codigo", "nombre", "apellido", "correoelectronico", "idtipousuario", "rol")
+    # 'codigo' viene de BD/negocio, lo dejamos de solo lectura si así lo manejan
         read_only_fields = ("codigo",)
 
     def update(self, instance, validated_data):
         new_role = validated_data.get("idtipousuario")
-
-        # 1) No permitir asignar un rol de OTRA empresa (roles globales sí valen)
         if new_role and new_role.empresa_id not in (None, instance.empresa_id):
             raise serializers.ValidationError("El rol pertenece a otra empresa.")
 
-        # 2) Regla opcional: no remover al último Administrador de la empresa
+            # 2) Regla opcional: no remover al último Administrador de la empresa
         was_admin = bool(instance.idtipousuario and instance.idtipousuario.rol.strip().lower() == 'administrador')
         will_be_admin = bool(new_role and new_role.rol.strip().lower() == 'administrador')
-
         if was_admin and not will_be_admin:
-            remaining = (
+            remaining  = (
                 Usuario.objects
                 .filter(empresa=instance.empresa, idtipousuario__rol__iexact='Administrador')
                 .exclude(pk=instance.pk)
@@ -230,9 +223,7 @@ class UsuarioAdminSerializer(serializers.ModelSerializer):
             )
             if remaining == 0:
                 raise serializers.ValidationError("No puedes remover el último administrador de la empresa.")
-
         return super().update(instance, validated_data)
-
 
 
 class UserNotificationSettingsSerializer(serializers.ModelSerializer):
@@ -266,20 +257,22 @@ class RecepcionistaProfileSerializer(serializers.ModelSerializer):
 # --- Serializer Principal para el Perfil del Usuario ---
 class UsuarioMeSerializer(serializers.ModelSerializer):
     """
-    Gestiona la lectura y actualización del perfil del usuario autenticado,
-    incluyendo los campos específicos de su rol.
+    Gestiona la lectura y actualización del perfil del usuario autenticado.
+    SOLO permite editar: correoelectronico y telefono
     """
     # Campo dinámico que mostrará el perfil correcto (paciente, odontologo, etc.)
     perfil = serializers.SerializerMethodField()
 
     class Meta:
         model = Usuario
-        # Campos comunes que siempre se mostrarán
+        # Campos que se mostrarán
         fields = (
             'codigo', 'nombre', 'apellido', 'telefono',
             'correoelectronico', 'sexo', 'perfil'
         )
-        read_only_fields = ('codigo', 'correoelectronico', 'perfil')
+        # Solo se puede editar: correoelectronico y telefono
+        # Todo lo demás es de solo lectura
+        read_only_fields = ('codigo', 'nombre', 'apellido', 'sexo', 'perfil')
 
     def get_perfil(self, instance):
         """
@@ -298,42 +291,52 @@ class UsuarioMeSerializer(serializers.ModelSerializer):
 
         return None  # Si no tiene un perfil específico
 
+    def validate_correoelectronico(self, value):
+        """Validar que el nuevo email no esté en uso por otro usuario"""
+        value = value.lower().strip()
+        # Verificar que no esté en uso por otro usuario
+        usuario_actual = self.instance
+        if Usuario.objects.filter(correoelectronico=value).exclude(codigo=usuario_actual.codigo).exists():
+            raise serializers.ValidationError("Este correo electrónico ya está en uso por otro usuario.")
+        return value
+
+    def validate_telefono(self, value):
+        """Validar formato del teléfono (8 dígitos)"""
+        value = value.strip()
+        if value and not re.match(r'^\d{8}$', value):
+            raise serializers.ValidationError("El teléfono debe tener exactamente 8 dígitos numéricos.")
+        return value
+
     def update(self, instance, validated_data):
         """
-        Esta función se ejecuta al GUARDAR (PATCH/PUT) los datos.
+        Solo actualiza correoelectronico y telefono.
+        También actualiza el Django User si cambia el email.
         """
-        # 1. Actualiza los campos comunes del modelo Usuario
-        instance.nombre = validated_data.get('nombre', instance.nombre)
-        instance.apellido = validated_data.get('apellido', instance.apellido)
-        instance.telefono = validated_data.get('telefono', instance.telefono)
+        from django.contrib.auth import get_user_model
+        User = get_user_model()
+
+        # Email nuevo (si se proporciona)
+        nuevo_email = validated_data.get('correoelectronico')
+        if nuevo_email and nuevo_email != instance.correoelectronico:
+            # Actualizar en Usuario (tabla api)
+            instance.correoelectronico = nuevo_email
+
+            # Actualizar también en Django User (auth_user)
+            try:
+                django_user = User.objects.get(username=instance.correoelectronico)
+                django_user.username = nuevo_email
+                django_user.email = nuevo_email
+                django_user.save()
+            except User.DoesNotExist:
+                # Si no existe el usuario Django, no hacer nada
+                pass
+
+        # Teléfono (si se proporciona)
+        nuevo_telefono = validated_data.get('telefono')
+        if nuevo_telefono is not None:
+            instance.telefono = nuevo_telefono
+
         instance.save()
-
-        # 2. Revisa los datos que llegaron en la petición (`self.context['request'].data`)
-        #    y actualiza el perfil correspondiente.
-        request_data = self.context['request'].data
-        role_id = instance.idtipousuario_id
-
-        if role_id == 2 and hasattr(instance, 'paciente'):
-            paciente_serializer = PacienteProfileSerializer(
-                instance.paciente, data=request_data, partial=True
-            )
-            paciente_serializer.is_valid(raise_exception=True)
-            paciente_serializer.save()
-
-        elif role_id == 4 and hasattr(instance, 'odontologo'):
-            odontologo_serializer = OdontologoProfileSerializer(
-                instance.odontologo, data=request_data, partial=True
-            )
-            odontologo_serializer.is_valid(raise_exception=True)
-            odontologo_serializer.save()
-
-        elif role_id == 3 and hasattr(instance, 'recepcionista'):
-            recepcionista_serializer = RecepcionistaProfileSerializer(
-                instance.recepcionista, data=request_data, partial=True
-            )
-            recepcionista_serializer.is_valid(raise_exception=True)
-            recepcionista_serializer.save()
-
         return instance
 
 #para notificaciones
