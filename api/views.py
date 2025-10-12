@@ -4,7 +4,6 @@ from django.contrib.auth import get_user_model
 from django.db import connection
 from django.core.mail import send_mail
 from django.conf import settings
-from django.http import JsonResponse
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_http_methods
 from django.db.models import Q
@@ -13,6 +12,8 @@ from datetime import datetime, timedelta
 import csv
 from io import BytesIO
 import os
+from django.utils import timezone
+from api.notifications_mobile.models import HistorialNotificacionMN, DispositivoMovilMN
 from rest_framework import status
 from rest_framework.generics import RetrieveUpdateAPIView
 from rest_framework.viewsets import ModelViewSet, ReadOnlyModelViewSet
@@ -308,6 +309,67 @@ Si necesitas cancelar o reprogramar tu cita, ponte en contacto con nosotros.
         # Refrescar desde la BD para obtener todas las relaciones
         consulta.refresh_from_db()
 
+        # 1) borrar pendientes anteriores de esta consulta
+        try:
+            HistorialNotificacionMN.objects.filter(
+                estado="PENDIENTE",
+                datos_adicionales__consulta_id=consulta.id
+            ).delete()
+        except Exception:
+            pass  # No fallar si hay error con notificaciones
+
+        # 2) (re)crear recordatorios 24h y 2h si hay fecha+hora
+        try:
+            cita_dt = None
+            if consulta.fecha and consulta.idhorario and consulta.idhorario.hora:
+                dt = datetime.combine(consulta.fecha, consulta.idhorario.hora)
+                cita_dt = make_aware(dt) if timezone.is_naive(dt) else dt
+
+            if cita_dt:
+                # único dispositivo activo del paciente (para fijar id al encolar)
+                device_id = (
+                    DispositivoMovilMN.objects
+                    .filter(codusuario=consulta.codpaciente.codusuario.codigo, activo=True)
+                    .order_by("-ultima_actividad")
+                    .values_list("id", flat=True)
+                    .first()
+                )
+
+                def _mk(title, body, when, label):
+                    HistorialNotificacionMN.objects.create(
+                        titulo=title,
+                        mensaje=body,
+                        datos_adicionales={
+                            "consulta_id": consulta.id,
+                            "empresa_id": getattr(consulta, "empresa_id", None) or getattr(consulta.empresa, "id", None),
+                            "reminder": label,
+                        },
+                        estado="PENDIENTE",
+                        fecha_creacion=timezone.now(),
+                        fecha_envio=when,
+                        fecha_entrega=None,
+                        fecha_lectura=None,
+                        error_mensaje=None,
+                        intentos=0,
+                        codusuario=consulta.codpaciente.codusuario.codigo,
+                        idtiponotificacion=1,
+                        idcanalnotificacion=1,
+                        iddispositivomovil=device_id,
+                    )
+
+                now = timezone.now()
+                for delta, label in ((timedelta(hours=24), "24h"), (timedelta(hours=2), "2h")):
+                    when = cita_dt - delta
+                    if when > now:
+                        _mk(
+                            "Recordatorio de consulta",
+                            f"Tienes una consulta el {cita_dt:%d/%m %H:%M}. Recordatorio {label}.",
+                            when,
+                            label
+                        )
+        except Exception as e:
+            print(f"Error al gestionar notificaciones móviles: {e}")
+
         # TODO: Considera enviar una notificación de reprogramación por email
 
         # Devolver la consulta completa actualizada con todas sus relaciones
@@ -355,6 +417,15 @@ Si necesitas cancelar o reprogramar tu cita, ponte en contacto con nosotros.
             )
         except Exception as log_error:
             print(f"[Bitacora] No se pudo guardar el log de cancelación: {log_error}")
+
+        # borrar recordatorios pendientes asociados a esta consulta
+        try:
+            HistorialNotificacionMN.objects.filter(
+                estado="PENDIENTE",
+                datos_adicionales__consulta_id=consulta.pk
+            ).delete()
+        except Exception:
+            pass  # No fallar si hay error con notificaciones
 
         # Eliminar la cita
         consulta.delete()
@@ -455,10 +526,6 @@ class HorarioViewSet(ReadOnlyModelViewSet):
 
     @action(detail=False, methods=['get'], url_path='disponibles')
     def disponibles(self, request):
-        """
-        Obtiene horarios disponibles para una fecha y odontólogo específicos.
-        Parámetros: fecha (YYYY-MM-DD), odontologo_id
-        """
         import logging
         from datetime import datetime as dt
 
@@ -467,7 +534,6 @@ class HorarioViewSet(ReadOnlyModelViewSet):
         # 1. OBTENER PARÁMETROS
         fecha = request.query_params.get('fecha')
         odontologo_id = request.query_params.get('odontologo_id')
-
         # Log de parámetros recibidos
         logger.info(f"[Horarios Disponibles] Parámetros recibidos - fecha: '{fecha}', odontologo_id: '{odontologo_id}'")
 
@@ -714,7 +780,7 @@ class BitacoraViewSet(ReadOnlyModelViewSet):
 
     def get_queryset(self):
         # Solo admins pueden ver la bitácora
-        if not _es_admin_por_tabla(self.request.user):
+        if not _es_admin_por_tabla(self.request):
             return Bitacora.objects.none()
 
         queryset = Bitacora.objects.select_related('usuario')
@@ -759,7 +825,7 @@ class BitacoraViewSet(ReadOnlyModelViewSet):
         """
         Endpoint para obtener estadísticas de la bitácora
         """
-        if not _es_admin_por_tabla(request.user):
+        if not _es_admin_por_tabla(request):
             return Response(
                 {"detail": "No tienes permisos para ver las estadísticas."},
                 status=status.HTTP_403_FORBIDDEN
@@ -808,7 +874,7 @@ class BitacoraViewSet(ReadOnlyModelViewSet):
         """
         Endpoint para exportar bitácora en CSV o PDF
         """
-        if not _es_admin_por_tabla(request.user):
+        if not _es_admin_por_tabla(request):
             return Response(
                 {"detail": "No tienes permisos para exportar la bitácora."},
                 status=status.HTTP_403_FORBIDDEN
