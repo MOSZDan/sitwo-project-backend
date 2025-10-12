@@ -364,7 +364,7 @@ from django.db import models
 
 
 class Tipodeusuario(models.Model):
-    rol = models.CharField(max_length=100)  # ← quitamos unique=True
+    rol = models.CharField(max_length=100)
     descripcion = models.TextField(blank=True, null=True)
     empresa = models.ForeignKey(
         Empresa, on_delete=models.CASCADE,
@@ -372,6 +372,7 @@ class Tipodeusuario(models.Model):
     )
 
     class Meta:
+        # managed = False
         db_table = 'tipodeusuario'
         constraints = [
             models.UniqueConstraint(

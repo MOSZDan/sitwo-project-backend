@@ -55,6 +55,11 @@ class RegisterSerializer(serializers.Serializer):
     fechanacimiento = serializers.DateField(required=False, allow_null=True)
     direccion = serializers.CharField(required=False, allow_blank=True)
 
+    def __init__(self, *args, **kwargs):
+        # Recibir el request para obtener el tenant (multi-tenancy)
+        self.request = kwargs.pop('context', {}).get('request', None)
+        super().__init__(*args, **kwargs)
+
     def validate(self, attrs):
         # Rol por defecto: paciente
         rol = (attrs.get("rol") or "paciente").strip().lower()
@@ -101,9 +106,16 @@ class RegisterSerializer(serializers.Serializer):
                 raise serializers.ValidationError({"carnetidentidad": "Cantidad de digitos de carnet de identidad inválido"})
             attrs["carnetidentidad"] = ci  # normalizado
 
-            # Unicidad CI
-            if Paciente.objects.filter(carnetidentidad=ci).exists():
-                raise serializers.ValidationError({"carnetidentidad": "El carnet ya existe."})
+            # Unicidad CI (POR EMPRESA en multi-tenancy)
+            empresa = getattr(self.request, 'tenant', None) if self.request else None
+            if empresa:
+                # Validar CI único dentro de la empresa
+                if Paciente.objects.filter(carnetidentidad=ci, empresa=empresa).exists():
+                    raise serializers.ValidationError({"carnetidentidad": "El carnet ya existe en esta clínica."})
+            else:
+                # Sin tenant, validar globalmente (fallback para compatibilidad)
+                if Paciente.objects.filter(carnetidentidad=ci).exists():
+                    raise serializers.ValidationError({"carnetidentidad": "El carnet ya existe."})
 
             # Fecha de nacimiento no futura
             from datetime import date
