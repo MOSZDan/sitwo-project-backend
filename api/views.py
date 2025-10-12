@@ -888,3 +888,359 @@ class BitacoraViewSet(ReadOnlyModelViewSet):
         response['Content-Disposition'] = f'attachment; filename="bitacora_{datetime.now().strftime("%Y%m%d")}.pdf"'
 
         return response
+
+
+# ============================================================================
+# DOCUMENTOS CLÍNICOS - S3
+# ============================================================================
+import boto3
+from botocore.exceptions import ClientError
+import os
+
+class DocumentoClinicoViewSet(ModelViewSet):
+    """
+    ViewSet para gestionar documentos clínicos almacenados en S3.
+    Permite subir, listar, descargar y eliminar documentos vinculados a pacientes.
+    """
+    permission_classes = [IsAuthenticated]
+    filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
+    search_fields = ['nombre_archivo', 'tipo_documento', 'notas']
+    ordering_fields = ['fecha_creacion', 'fecha_documento', 'tipo_documento']
+    ordering = ['-fecha_creacion']
+
+    def get_queryset(self):
+        from .models import DocumentoClinico
+        queryset = DocumentoClinico.objects.select_related(
+            'codpaciente',
+            'codpaciente__codusuario',
+            'profesional_carga'
+        )
+
+        # Filtrar por tenant si está disponible (multi-tenancy)
+        if hasattr(self.request, 'tenant') and self.request.tenant:
+            queryset = queryset.filter(empresa=self.request.tenant)
+
+        # Filtro por paciente
+        codpaciente = self.request.query_params.get('codpaciente')
+        if codpaciente:
+            queryset = queryset.filter(codpaciente__codusuario=codpaciente)
+
+        # Filtro por tipo de documento
+        tipo = self.request.query_params.get('tipo')
+        if tipo:
+            queryset = queryset.filter(tipo_documento=tipo)
+
+        # Filtro por consulta
+        idconsulta = self.request.query_params.get('idconsulta')
+        if idconsulta:
+            queryset = queryset.filter(idconsulta=idconsulta)
+
+        # Filtro por historial clínico
+        idhistorialclinico = self.request.query_params.get('idhistorialclinico')
+        if idhistorialclinico:
+            queryset = queryset.filter(idhistorialclinico=idhistorialclinico)
+
+        return queryset
+
+    def get_serializer_class(self):
+        from .serializers import DocumentoClinicoSerializer, DocumentoClinicoUploadSerializer
+        if self.action == 'upload':
+            return DocumentoClinicoUploadSerializer
+        return DocumentoClinicoSerializer
+
+    @action(detail=False, methods=['post'])
+    def upload(self, request):
+        """
+        Endpoint para subir documentos clínicos a S3.
+        POST /api/documentos-clinicos/upload/
+        """
+        from .serializers import DocumentoClinicoUploadSerializer, DocumentoClinicoSerializer
+        from .models import DocumentoClinico, Paciente
+
+        serializer = DocumentoClinicoUploadSerializer(data=request.data)
+
+        if not serializer.is_valid():
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+        archivo = serializer.validated_data['archivo']
+        codpaciente = serializer.validated_data['codpaciente']
+
+        # Generar nombre único para S3
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        extension = os.path.splitext(archivo.name)[1]
+        nombre_s3 = f"documentos_clinicos/{codpaciente}/{timestamp}_{archivo.name}"
+
+        try:
+            # Configurar cliente S3
+            s3_client = boto3.client(
+                's3',
+                aws_access_key_id=settings.AWS_ACCESS_KEY_ID,
+                aws_secret_access_key=settings.AWS_SECRET_ACCESS_KEY,
+                region_name=settings.AWS_S3_REGION_NAME
+            )
+
+            # Subir archivo a S3
+            s3_client.upload_fileobj(
+                archivo.file,
+                settings.AWS_STORAGE_BUCKET_NAME,
+                nombre_s3,
+                ExtraArgs={
+                    'ContentType': archivo.content_type
+                    # ACL removido - se maneja con políticas del bucket
+                }
+            )
+
+            # Generar URL del archivo
+            url_s3 = f"https://{settings.AWS_STORAGE_BUCKET_NAME}.s3.{settings.AWS_S3_REGION_NAME}.amazonaws.com/{nombre_s3}"
+
+            # Buscar el Usuario (modelo de negocio) del usuario autenticado
+            usuario_profesional = None
+            if request.user.is_authenticated:
+                try:
+                    usuario_profesional = Usuario.objects.get(
+                        correoelectronico__iexact=request.user.email
+                    )
+                except Usuario.DoesNotExist:
+                    pass
+
+            # Crear registro en la base de datos
+            documento = DocumentoClinico.objects.create(
+                codpaciente_id=codpaciente,
+                idconsulta_id=serializer.validated_data.get('idconsulta'),
+                idhistorialclinico_id=serializer.validated_data.get('idhistorialclinico'),
+                tipo_documento=serializer.validated_data['tipo_documento'],
+                nombre_archivo=archivo.name,
+                url_s3=url_s3,
+                s3_key=nombre_s3,
+                tamanio_bytes=archivo.size,
+                extension=extension.lstrip('.'),
+                profesional_carga=usuario_profesional,
+                fecha_documento=serializer.validated_data['fecha_documento'],
+                notas=serializer.validated_data.get('notas', ''),
+                empresa=getattr(request, 'tenant', None)
+            )
+
+            # Registrar en bitácora
+            self._crear_bitacora(
+                request,
+                'SUBIDA_DOCUMENTO',
+                f"Documento '{archivo.name}' subido para paciente ID {codpaciente}",
+                'DocumentoClinico',
+                str(documento.id)
+            )
+
+            return Response(
+                DocumentoClinicoSerializer(documento).data,
+                status=status.HTTP_201_CREATED
+            )
+
+        except ClientError as e:
+            return Response(
+                {'error': f'Error al subir archivo a S3: {str(e)}'},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+        except Exception as e:
+            return Response(
+                {'error': f'Error inesperado: {str(e)}'},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+
+    @action(detail=True, methods=['get'])
+    def download_url(self, request, pk=None):
+        """
+        Endpoint para generar URL de descarga firmada (válida 1 hora).
+        GET /api/documentos-clinicos/{id}/download_url/
+        """
+        documento = self.get_object()
+
+        try:
+            s3_client = boto3.client(
+                's3',
+                aws_access_key_id=settings.AWS_ACCESS_KEY_ID,
+                aws_secret_access_key=settings.AWS_SECRET_ACCESS_KEY,
+                region_name=settings.AWS_S3_REGION_NAME
+            )
+
+            # Generar URL firmada válida por 1 hora
+            url = s3_client.generate_presigned_url(
+                'get_object',
+                Params={
+                    'Bucket': settings.AWS_STORAGE_BUCKET_NAME,
+                    'Key': documento.s3_key
+                },
+                ExpiresIn=3600  # 1 hora
+            )
+
+            # Registrar acceso en bitácora
+            self._crear_bitacora(
+                request,
+                'DESCARGA_DOCUMENTO',
+                f"Generada URL de descarga para documento '{documento.nombre_archivo}'",
+                'DocumentoClinico',
+                str(documento.id)
+            )
+
+            return Response({'download_url': url})
+
+        except ClientError as e:
+            return Response(
+                {'error': f'Error al generar URL de descarga: {str(e)}'},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+
+    def destroy(self, request, *args, **kwargs):
+        """
+        Eliminar documento (tanto de S3 como de BD).
+        DELETE /api/documentos-clinicos/{id}/
+        """
+        documento = self.get_object()
+
+        try:
+            # Eliminar de S3
+            s3_client = boto3.client(
+                's3',
+                aws_access_key_id=settings.AWS_ACCESS_KEY_ID,
+                aws_secret_access_key=settings.AWS_SECRET_ACCESS_KEY,
+                region_name=settings.AWS_S3_REGION_NAME
+            )
+
+            s3_client.delete_object(
+                Bucket=settings.AWS_STORAGE_BUCKET_NAME,
+                Key=documento.s3_key
+            )
+
+            # Registrar en bitácora antes de eliminar
+            self._crear_bitacora(
+                request,
+                'ELIMINACION_DOCUMENTO',
+                f"Documento '{documento.nombre_archivo}' eliminado",
+                'DocumentoClinico',
+                str(documento.id)
+            )
+
+            # Eliminar de BD
+            documento.delete()
+
+            return Response(
+                {'message': 'Documento eliminado correctamente'},
+                status=status.HTTP_204_NO_CONTENT
+            )
+
+        except ClientError as e:
+            return Response(
+                {'error': f'Error al eliminar archivo de S3: {str(e)}'},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+
+    def partial_update(self, request, *args, **kwargs):
+        """
+        Actualizar metadatos de un documento (PATCH).
+        PATCH /api/documentos-clinicos/{id}/
+
+        Permite modificar:
+        - tipo_documento
+        - fecha_documento
+        - notas
+        - idconsulta
+        - idhistorialclinico
+
+        NO permite modificar el archivo físico en S3.
+        """
+        documento = self.get_object()
+
+        # Obtener datos antiguos para bitácora
+        valores_anteriores = {
+            'tipo_documento': documento.tipo_documento,
+            'fecha_documento': str(documento.fecha_documento),
+            'notas': documento.notas,
+            'idconsulta': documento.idconsulta_id,
+            'idhistorialclinico': documento.idhistorialclinico_id
+        }
+
+        # Actualizar campos simples
+        if 'tipo_documento' in request.data:
+            documento.tipo_documento = request.data['tipo_documento']
+
+        if 'fecha_documento' in request.data:
+            documento.fecha_documento = request.data['fecha_documento']
+
+        if 'notas' in request.data:
+            documento.notas = request.data['notas']
+
+        # Actualizar Foreign Keys (usar _id para asignación directa)
+        if 'idconsulta' in request.data:
+            consulta_id = request.data['idconsulta']
+            if consulta_id:
+                # Validar que pertenezca al mismo paciente
+                if not Consulta.objects.filter(
+                    id=consulta_id,
+                    codpaciente=documento.codpaciente
+                ).exists():
+                    return Response(
+                        {'error': 'La consulta no pertenece al paciente del documento'},
+                        status=status.HTTP_400_BAD_REQUEST
+                    )
+            documento.idconsulta_id = consulta_id  # ← CORREGIDO: usar _id
+
+        if 'idhistorialclinico' in request.data:
+            historial_id = request.data['idhistorialclinico']
+            if historial_id:
+                # Validar que pertenezca al mismo paciente
+                if not Historialclinico.objects.filter(
+                    id=historial_id,
+                    pacientecodigo=documento.codpaciente
+                ).exists():
+                    return Response(
+                        {'error': 'El historial clínico no pertenece al paciente del documento'},
+                        status=status.HTTP_400_BAD_REQUEST
+                    )
+            documento.idhistorialclinico_id = historial_id  # ← CORREGIDO: usar _id
+
+        documento.save()
+
+        # Registrar en bitácora
+        valores_nuevos = {
+            'tipo_documento': documento.tipo_documento,
+            'fecha_documento': str(documento.fecha_documento),
+            'notas': documento.notas,
+            'idconsulta': documento.idconsulta_id,
+            'idhistorialclinico': documento.idhistorialclinico_id
+        }
+
+        self._crear_bitacora(
+            request,
+            'MODIFICACION_DOCUMENTO',
+            f"Metadatos de documento '{documento.nombre_archivo}' actualizados",
+            'DocumentoClinico',
+            str(documento.id)
+        )
+
+        from .serializers import DocumentoClinicoSerializer
+        return Response(
+            DocumentoClinicoSerializer(documento).data,
+            status=status.HTTP_200_OK
+        )
+
+    def _crear_bitacora(self, request, accion, descripcion, modelo, objeto_id):
+        """Método auxiliar para crear registros en la bitácora"""
+        try:
+            Bitacora.objects.create(
+                accion=accion,
+                tabla_afectada=modelo,
+                registro_id=objeto_id,
+                usuario=request.user,
+                ip_address=self._get_client_ip(request),
+                user_agent=request.META.get('HTTP_USER_AGENT', '')[:255],
+                empresa=getattr(request, 'tenant', None)
+            )
+        except Exception:
+            pass  # No fallar si hay error en bitácora
+
+    def _get_client_ip(self, request):
+        """Obtener IP del cliente"""
+        x_forwarded_for = request.META.get('HTTP_X_FORWARDED_FOR')
+        if x_forwarded_for:
+            ip = x_forwarded_for.split(',')[0]
+        else:
+            ip = request.META.get('REMOTE_ADDR')
+        return ip
