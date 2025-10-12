@@ -69,4 +69,5 @@ urlpatterns = [
 
     # Rutas de los viewsets (router incluido solo una vez)
     path("", include(router.urls)),
+    path("mobile-notif/", include("api.notifications_mobile.urls")),
 ]

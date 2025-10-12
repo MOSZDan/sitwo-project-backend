@@ -12,6 +12,8 @@ from django.utils.timezone import make_aware
 from datetime import datetime, timedelta
 import csv
 from io import BytesIO
+from django.utils import timezone
+from api.notifications_mobile.models import HistorialNotificacionMN, DispositivoMovilMN
 
 from rest_framework import status
 from rest_framework.generics import RetrieveUpdateAPIView
@@ -141,6 +143,18 @@ def users_count(request):
     return JsonResponse({"count": User.objects.count()})
 
 
+def _empresa_id_from_request(request) -> int | None:
+    """Usa tenant si existe; si no, deduce empresa por el usuario autenticado."""
+    if hasattr(request, 'tenant') and request.tenant:
+        return getattr(request.tenant, 'id', None)
+
+    email = (getattr(request.user, "email", None) or getattr(request.user, "username", "")).strip()
+    if not email:
+        return None
+
+    return Usuario.objects.filter(correoelectronico__iexact=email).values_list("empresa_id", flat=True).first()
+
+
 # Helper reutilizable: ¿el usuario actual es admin en la tabla de negocio?
 def _es_admin_por_tabla(dj_user) -> bool:
     email = (getattr(dj_user, "email", None) or getattr(dj_user, "username", "")).strip().lower()
@@ -197,8 +211,7 @@ class ConsultaViewSet(ModelViewSet):
     filterset_fields = ['codpaciente', 'fecha']
 
     def get_queryset(self):
-        """Filtra consultas por empresa (multi-tenancy)"""
-        queryset = Consulta.objects.select_related(
+        qs = Consulta.objects.select_related(
             "codpaciente__codusuario",
             "cododontologo__codusuario",
             "codrecepcionista__codusuario",
@@ -206,32 +219,43 @@ class ConsultaViewSet(ModelViewSet):
             "idtipoconsulta",
             "idestadoconsulta",
         )
-
-        # Filtrar por tenant si está disponible
-        if hasattr(self.request, 'tenant') and self.request.tenant:
-            queryset = queryset.filter(empresa=self.request.tenant)
-
-        return queryset
+        emp_id = _empresa_id_from_request(self.request)
+        if emp_id:
+            qs = qs.filter(empresa_id=emp_id)
+        return qs
 
     def perform_create(self, serializer):
-        """Asigna automáticamente la empresa del tenant al crear una consulta"""
-        # Asignar empresa del tenant
-        if hasattr(self.request, 'tenant') and self.request.tenant:
-            serializer.save(empresa=self.request.tenant)
+        """
+        Asigna empresa_id de forma robusta:
+          1) tenant si existe
+          2) empresa del usuario autenticado (tabla Usuario)
+          3) si aún falta: empresa del paciente u odontólogo de la consulta
+        """
+        emp_id = _empresa_id_from_request(self.request)
+
+        if emp_id:
+            serializer.save(empresa_id=emp_id)
         else:
             serializer.save()
 
-        # Enviar email de confirmación (código existente)
-        consulta = serializer.instance
+        consulta = serializer.instance  # ya guardada
+
+        # Si por cualquier motivo quedó NULL, infiere de paciente/odontólogo y actualiza
+        if not getattr(consulta, "empresa_id", None):
+            emp_id2 = getattr(getattr(consulta, "codpaciente", None), "empresa_id", None) \
+                      or getattr(getattr(consulta, "cododontologo", None), "empresa_id", None)
+            if emp_id2:
+                Consulta.objects.filter(pk=consulta.pk).update(empresa_id=emp_id2)
+                consulta.empresa_id = emp_id2
+
+        # --- correo (tu código existente) ---
         paciente = consulta.codpaciente
         usuario_paciente = paciente.codusuario
-
         if getattr(usuario_paciente, "notificaciones_email", False):
             try:
                 subject = "Confirmación de tu cita en Clínica Dental"
                 fecha_formateada = consulta.fecha.strftime('%d de %B de %Y')
                 hora_formateada = consulta.idhorario.hora.strftime('%H:%M')
-
                 message = f"""
 Hola {usuario_paciente.nombre},
 
@@ -247,12 +271,12 @@ Recuerda llegar 15 minutos antes de tu cita.
 ¡Te esperamos en Smile Studio!
 
 Si necesitas cancelar o reprogramar tu cita, ponte en contacto con nosotros.
-                """
-
+            """
+                from django.conf import settings
+                from django.core.mail import send_mail
                 from_email = settings.DEFAULT_FROM_EMAIL
                 recipient_list = [usuario_paciente.correoelectronico]
                 send_mail(subject, message, from_email, recipient_list, fail_silently=False)
-
             except Exception as e:
                 print(f"Error al enviar correo de notificación: {e}")
 
@@ -292,7 +316,60 @@ Si necesitas cancelar o reprogramar tu cita, ponte en contacto con nosotros.
         # Refrescar desde la BD para obtener todas las relaciones
         consulta.refresh_from_db()
 
-        # TODO: Considera enviar una notificación de reprogramación por email
+        # 1) borrar pendientes anteriores de esta consulta
+        HistorialNotificacionMN.objects.filter(
+            estado="PENDIENTE",
+            datos_adicionales__consulta_id=consulta.id
+        ).delete()
+
+        # 2) (re)crear recordatorios 24h y 2h si hay fecha+hora
+        cita_dt = None
+        if consulta.fecha and consulta.idhorario and consulta.idhorario.hora:
+            dt = datetime.combine(consulta.fecha, consulta.idhorario.hora)
+            cita_dt = make_aware(dt) if timezone.is_naive(dt) else dt
+
+        if cita_dt:
+            # único dispositivo activo del paciente (para fijar id al encolar)
+            device_id = (
+                DispositivoMovilMN.objects
+                .filter(codusuario=consulta.codpaciente.codusuario.codigo, activo=True)
+                .order_by("-ultima_actividad")
+                .values_list("id", flat=True)
+                .first()
+            )
+
+            def _mk(title, body, when, label):
+                HistorialNotificacionMN.objects.create(
+                    titulo=title,
+                    mensaje=body,
+                    datos_adicionales={
+                        "consulta_id": consulta.id,
+                        "empresa_id": getattr(consulta, "empresa_id", None),
+                        "reminder": label,
+                    },
+                    estado="PENDIENTE",
+                    fecha_creacion=timezone.now(),
+                    fecha_envio=when,
+                    fecha_entrega=None,
+                    fecha_lectura=None,
+                    error_mensaje=None,
+                    intentos=0,
+                    codusuario=consulta.codpaciente.codusuario.codigo,
+                    idtiponotificacion=1,
+                    idcanalnotificacion=1,
+                    iddispositivomovil=device_id,
+                )
+
+            now = timezone.now()
+            for delta, label in ((timedelta(hours=24), "24h"), (timedelta(hours=2), "2h")):
+                when = cita_dt - delta
+                if when > now:
+                    _mk(
+                        "Recordatorio de consulta",
+                        f"Tienes una consulta el {cita_dt:%d/%m %H:%M}. Recordatorio {label}.",
+                        when,
+                        label
+                    )
 
         # Devolver la consulta completa actualizada con todas sus relaciones
         consulta_serializer = ConsultaSerializer(consulta)
@@ -339,6 +416,15 @@ Si necesitas cancelar o reprogramar tu cita, ponte en contacto con nosotros.
             )
         except Exception as log_error:
             print(f"[Bitacora] No se pudo guardar el log de cancelación: {log_error}")
+
+        # borrar recordatorios pendientes asociados a esta consulta
+        try:
+            HistorialNotificacionMN.objects.filter(
+                estado="PENDIENTE",
+                datos_adicionales__consulta_id=consulta.pk
+            ).delete()
+        except Exception as _:
+            pass
 
         # Eliminar la cita
         consulta.delete()
@@ -413,14 +499,11 @@ class OdontologoViewSet(ReadOnlyModelViewSet):
     serializer_class = OdontologoMiniSerializer
 
     def get_queryset(self):
-        """Filtra odontólogos por empresa (multi-tenancy)"""
-        queryset = Odontologo.objects.all()
-
-        # Filtrar por tenant si está disponible
-        if hasattr(self.request, 'tenant') and self.request.tenant:
-            queryset = queryset.filter(empresa=self.request.tenant)
-
-        return queryset
+        qs = Odontologo.objects.all()
+        emp_id = _empresa_id_from_request(self.request)
+        if emp_id:
+            qs = qs.filter(empresa_id=emp_id)
+        return qs
 
 
 class HorarioViewSet(ReadOnlyModelViewSet):
@@ -428,46 +511,33 @@ class HorarioViewSet(ReadOnlyModelViewSet):
     serializer_class = HorarioSerializer
 
     def get_queryset(self):
-        """Filtra horarios por empresa (multi-tenancy)"""
-        queryset = Horario.objects.all()
-
-        # Filtrar por tenant si está disponible
-        if hasattr(self.request, 'tenant') and self.request.tenant:
-            queryset = queryset.filter(empresa=self.request.tenant)
-
-        return queryset
+        qs = Horario.objects.all()
+        emp_id = _empresa_id_from_request(self.request)
+        if emp_id:
+            qs = qs.filter(empresa_id=emp_id)
+        return qs
 
     @action(detail=False, methods=['get'], url_path='disponibles')
     def disponibles(self, request):
-        """
-        Obtiene horarios disponibles para una fecha y odontólogo específicos.
-        Parámetros: fecha (YYYY-MM-DD), odontologo_id
-        """
         fecha = request.query_params.get('fecha')
         odontologo_id = request.query_params.get('odontologo_id')
-
         if not fecha or not odontologo_id:
             return Response(
                 {"detail": "Se requieren los parámetros 'fecha' y 'odontologo_id'."},
                 status=status.HTTP_400_BAD_REQUEST
             )
 
-        # Obtener todos los horarios del tenant
         todos_horarios = self.get_queryset()
 
-        # Filtrar horarios ocupados para ese odontólogo en esa fecha (mismo tenant)
         horarios_ocupados_query = Consulta.objects.filter(
             cododontologo_id=odontologo_id,
             fecha=fecha
         )
-
-        # Filtrar por tenant
-        if hasattr(request, 'tenant') and request.tenant:
-            horarios_ocupados_query = horarios_ocupados_query.filter(empresa=request.tenant)
+        emp_id = _empresa_id_from_request(request)
+        if emp_id:
+            horarios_ocupados_query = horarios_ocupados_query.filter(empresa_id=emp_id)
 
         horarios_ocupados = horarios_ocupados_query.values_list('idhorario_id', flat=True)
-
-        # Horarios disponibles = todos - ocupados
         horarios_disponibles = todos_horarios.exclude(id__in=horarios_ocupados)
 
         serializer = self.get_serializer(horarios_disponibles, many=True)
@@ -479,14 +549,11 @@ class TipodeconsultaViewSet(ReadOnlyModelViewSet):
     serializer_class = TipodeconsultaSerializer
 
     def get_queryset(self):
-        """Filtra tipos de consulta por empresa (multi-tenancy)"""
-        queryset = Tipodeconsulta.objects.all()
-
-        # Filtrar por tenant si está disponible
-        if hasattr(self.request, 'tenant') and self.request.tenant:
-            queryset = queryset.filter(empresa=self.request.tenant)
-
-        return queryset
+        qs = Tipodeconsulta.objects.all()
+        emp_id = _empresa_id_from_request(self.request)
+        if emp_id:
+            qs = qs.filter(empresa_id=emp_id)
+        return qs
 
 
 # -------------------- ADMIN: Roles y Usuarios --------------------
