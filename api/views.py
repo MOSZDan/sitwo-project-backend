@@ -44,8 +44,6 @@ from .serializers import (
     HistorialclinicoCreateSerializer,
     HistorialclinicoListSerializer
 )
-
-
 # -------------------- Health / Utils --------------------
 
 def health(request):
@@ -592,7 +590,6 @@ class TipodeusuarioViewSet(ReadOnlyModelViewSet):
             qs = qs.filter(Q(empresa=t) | Q(empresa__isnull=True))
         return qs
 
-
 class UsuarioViewSet(ModelViewSet):
     permission_classes = [IsAuthenticated]
     serializer_class = UsuarioAdminSerializer
@@ -615,12 +612,23 @@ class UsuarioViewSet(ModelViewSet):
         return queryset
 
     def partial_update(self, request, *args, **kwargs):
+        # Solo administradores del tenant (o staff) pueden cambiar roles
         if not (_es_admin_por_tabla(request) or getattr(request.user, "is_staff", False)):
             return Response({"detail": "Solo administradores pueden cambiar roles."}, status=403)
-
         return super().partial_update(request, *args, **kwargs)
 
+    @action(detail=False, methods=['get'], url_path='por-roles')
+    def por_roles(self, request):
+        # /api/usuarios/por-roles/?ids=1,3,4
+        ids_param = request.query_params.get('ids', '')
+        try:
+            ids = [int(x) for x in ids_param.split(',') if x.strip()]
+        except ValueError:
+            return Response({"detail": "Parámetro 'ids' inválido"}, status=400)
 
+        qs = self.get_queryset().filter(idtipousuario_id__in=ids).order_by('apellido', 'nombre')
+        data = UsuarioAdminSerializer(qs, many=True).data
+        return Response(data)
 
 def ping(_):
     return JsonResponse({"ok": True})
