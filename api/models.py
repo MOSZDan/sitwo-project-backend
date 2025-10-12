@@ -364,13 +364,21 @@ from django.db import models
 
 
 class Tipodeusuario(models.Model):
-    rol = models.CharField(unique=True, max_length=100)
+    rol = models.CharField(max_length=100)  # ← quitamos unique=True
     descripcion = models.TextField(blank=True, null=True)
-    empresa = models.ForeignKey(Empresa, on_delete=models.CASCADE, related_name='tipos_usuario', null=True, blank=True)
+    empresa = models.ForeignKey(
+        Empresa, on_delete=models.CASCADE,
+        related_name='tipos_usuario', null=True, blank=True
+    )
 
     class Meta:
-        # managed = False
         db_table = 'tipodeusuario'
+        constraints = [
+            models.UniqueConstraint(
+                fields=['empresa', 'rol'],
+                name='uq_tipousuario_empresa_rol'
+            )
+        ]
 
 
 class Tipopago(models.Model):
@@ -427,3 +435,85 @@ class Bitacora(models.Model):
     def __str__(self):
         usuario_nombre = self.usuario.nombre if self.usuario else "Sistema"
         return f"{usuario_nombre} - {self.accion} - {self.tabla_afectada} - {self.timestamp}"
+
+
+# ============================================================================
+# DOCUMENTOS CLÍNICOS EN S3
+# ============================================================================
+import uuid
+
+class DocumentoClinico(models.Model):
+    """
+    Modelo para gestionar documentos clínicos almacenados en AWS S3.
+    Vincula archivos médicos (radiografías, PDF, imágenes) a pacientes, consultas e historiales.
+    """
+    TIPO_CHOICES = [
+        ('radiografia', 'Radiografía'),
+        ('examen_laboratorio', 'Examen de Laboratorio'),
+        ('imagen_diagnostico', 'Imagen de Diagnóstico'),
+        ('consentimiento', 'Consentimiento Informado'),
+        ('receta', 'Receta Médica'),
+        ('foto_clinica', 'Foto Clínica'),
+        ('otro', 'Otro'),
+    ]
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    codpaciente = models.ForeignKey(
+        Paciente,
+        on_delete=models.CASCADE,
+        db_column='codpaciente',
+        related_name='documentos_clinicos'
+    )
+    idconsulta = models.ForeignKey(
+        Consulta,
+        on_delete=models.SET_NULL,
+        db_column='idconsulta',
+        null=True,
+        blank=True,
+        related_name='documentos'
+    )
+    idhistorialclinico = models.ForeignKey(
+        Historialclinico,
+        on_delete=models.SET_NULL,
+        db_column='idhistorialclinico',
+        null=True,
+        blank=True,
+        related_name='documentos_s3'
+    )
+
+    tipo_documento = models.CharField(max_length=50, choices=TIPO_CHOICES)
+    nombre_archivo = models.CharField(max_length=255)
+    url_s3 = models.CharField(max_length=500)
+    s3_key = models.CharField(max_length=500)
+    tamanio_bytes = models.PositiveIntegerField()
+    extension = models.CharField(max_length=10)
+
+    profesional_carga = models.ForeignKey(
+        Usuario,
+        on_delete=models.SET_NULL,
+        db_column='profesional_carga',
+        null=True,
+        related_name='documentos_cargados'
+    )
+    fecha_documento = models.DateField(help_text="Fecha del documento médico")
+    notas = models.TextField(blank=True, null=True)
+
+    fecha_creacion = models.DateTimeField(auto_now_add=True)
+    fecha_actualizacion = models.DateTimeField(auto_now=True)
+
+    empresa = models.ForeignKey(
+        Empresa,
+        on_delete=models.CASCADE,
+        related_name='documentos_clinicos',
+        null=True,
+        blank=True
+    )
+
+    class Meta:
+        db_table = 'documento_clinico'
+        ordering = ['-fecha_creacion']
+        verbose_name = 'Documento Clínico'
+        verbose_name_plural = 'Documentos Clínicos'
+
+    def __str__(self):
+        return f"{self.tipo_documento} - {self.nombre_archivo} - Paciente: {self.codpaciente}"

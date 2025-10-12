@@ -183,39 +183,56 @@ class TipodeusuarioSerializer(serializers.ModelSerializer):
         fields = ("identificacion", "rol", "descripcion")
 
 
+# serializers.py
+from django.db.models import Q
+from rest_framework import serializers
+from .models import Usuario, Tipodeusuario
+
 class UsuarioAdminSerializer(serializers.ModelSerializer):
     rol = serializers.CharField(source="idtipousuario.rol", read_only=True)
-    idtipousuario = serializers.PrimaryKeyRelatedField(
-        queryset=Tipodeusuario.objects.all(), required=False
-    )
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        request = self.context.get('request')
+
+        qs = Tipodeusuario.objects.all()
+        # Mostrar SOLO roles del tenant + globales (empresa IS NULL)
+        if request and hasattr(request, 'tenant') and request.tenant:
+            emp = request.tenant
+            qs = qs.filter(Q(empresa=emp) | Q(empresa__isnull=True))
+
+        self.fields['idtipousuario'] = serializers.PrimaryKeyRelatedField(
+            queryset=qs, required=False
+        )
 
     class Meta:
         model = Usuario
-        fields = (
-            "codigo",
-            "nombre",
-            "apellido",
-            "correoelectronico",
-            "idtipousuario",
-            "rol",
-        )
-    # 'codigo' viene de BD/negocio, lo dejamos de solo lectura si así lo manejan
+        fields = ("codigo", "nombre", "apellido", "correoelectronico", "idtipousuario", "rol")
         read_only_fields = ("codigo",)
 
     def update(self, instance, validated_data):
         new_role = validated_data.get("idtipousuario")
-        if new_role and instance.idtipousuario_id == 1 and new_role.id != 1:
-            remaining_admins = (
+
+        # 1) No permitir asignar un rol de OTRA empresa (roles globales sí valen)
+        if new_role and new_role.empresa_id not in (None, instance.empresa_id):
+            raise serializers.ValidationError("El rol pertenece a otra empresa.")
+
+        # 2) Regla opcional: no remover al último Administrador de la empresa
+        was_admin = bool(instance.idtipousuario and instance.idtipousuario.rol.strip().lower() == 'administrador')
+        will_be_admin = bool(new_role and new_role.rol.strip().lower() == 'administrador')
+
+        if was_admin and not will_be_admin:
+            remaining = (
                 Usuario.objects
-                .filter(idtipousuario_id=1)
+                .filter(empresa=instance.empresa, idtipousuario__rol__iexact='Administrador')
                 .exclude(pk=instance.pk)
                 .count()
             )
-            if remaining_admins == 0:
-                raise serializers.ValidationError(
-                    "No puedes remover el último administrador del sistema."
-                )
+            if remaining == 0:
+                raise serializers.ValidationError("No puedes remover el último administrador de la empresa.")
+
         return super().update(instance, validated_data)
+
 
 
 class UserNotificationSettingsSerializer(serializers.ModelSerializer):
@@ -353,10 +370,12 @@ class HistorialclinicoCreateSerializer(serializers.ModelSerializer):
     class Meta:
         model = Historialclinico
         fields = [
+            'id',  # ← AGREGADO para que se devuelva en la respuesta
             'pacientecodigo',
             'alergias', 'enfermedades', 'motivoconsulta', 'diagnostico',
             'forzar_nuevo_episodio',
         ]
+        read_only_fields = ['id']  # ← AGREGADO: id es solo lectura (auto-generado)
 
     def validate(self, attrs):
         if not (attrs.get('motivoconsulta') or '').strip():
@@ -595,3 +614,133 @@ def crear_registro_bitacora(accion, usuario=None, ip_address='127.0.0.1', descri
         objeto_id=objeto_id,
         datos_adicionales=datos_adicionales or {}
     )
+
+
+# ============================================================================
+# DOCUMENTOS CLÍNICOS - S3
+# ============================================================================
+from .models import DocumentoClinico
+from django.core.validators import FileExtensionValidator
+
+class DocumentoClinicoSerializer(serializers.ModelSerializer):
+    """Serializer para listar y detallar documentos clínicos"""
+    profesional_nombre = serializers.SerializerMethodField()
+    paciente_nombre = serializers.SerializerMethodField()
+    tamanio_mb = serializers.SerializerMethodField()
+    url_firmada = serializers.SerializerMethodField()  # ← NUEVO: URL firmada temporal
+
+    class Meta:
+        model = DocumentoClinico
+        fields = [
+            'id', 'codpaciente', 'idconsulta', 'idhistorialclinico',
+            'tipo_documento', 'nombre_archivo', 'url_s3', 'tamanio_bytes',
+            'tamanio_mb', 'extension', 'profesional_carga', 'profesional_nombre',
+            'paciente_nombre', 'fecha_documento', 'notas', 'fecha_creacion',
+            'url_firmada'  # ← NUEVO
+        ]
+        read_only_fields = [
+            'id', 'url_s3', 's3_key', 'tamanio_bytes', 'extension',
+            'profesional_carga', 'fecha_creacion'
+        ]
+
+    def get_profesional_nombre(self, obj):
+        if obj.profesional_carga:
+            return f"{obj.profesional_carga.nombre} {obj.profesional_carga.apellido}"
+        return None
+
+    def get_paciente_nombre(self, obj):
+        if obj.codpaciente and obj.codpaciente.codusuario:
+            usuario = obj.codpaciente.codusuario
+            return f"{usuario.nombre} {usuario.apellido}"
+        return None
+
+    def get_tamanio_mb(self, obj):
+        """Convierte bytes a MB para mejor lectura"""
+        return round(obj.tamanio_bytes / (1024 * 1024), 2)
+
+    def get_url_firmada(self, obj):
+        """Genera URL firmada válida por 1 hora para acceso seguro"""
+        try:
+            import boto3
+            from django.conf import settings
+
+            s3_client = boto3.client(
+                's3',
+                aws_access_key_id=settings.AWS_ACCESS_KEY_ID,
+                aws_secret_access_key=settings.AWS_SECRET_ACCESS_KEY,
+                region_name=settings.AWS_S3_REGION_NAME
+            )
+
+            url = s3_client.generate_presigned_url(
+                'get_object',
+                Params={
+                    'Bucket': settings.AWS_STORAGE_BUCKET_NAME,
+                    'Key': obj.s3_key
+                },
+                ExpiresIn=3600  # 1 hora
+            )
+            return url
+        except Exception as e:
+            return None
+
+
+class DocumentoClinicoUploadSerializer(serializers.Serializer):
+    """Serializer para validar la subida de documentos clínicos"""
+    archivo = serializers.FileField(
+        validators=[
+            FileExtensionValidator(
+                allowed_extensions=['pdf', 'jpg', 'jpeg', 'png', 'dcm', 'dicom']
+            )
+        ]
+    )
+    codpaciente = serializers.IntegerField()
+    idconsulta = serializers.IntegerField(required=False, allow_null=True)
+    idhistorialclinico = serializers.IntegerField(required=False, allow_null=True)
+    tipo_documento = serializers.ChoiceField(choices=DocumentoClinico.TIPO_CHOICES)
+    fecha_documento = serializers.DateField()
+    notas = serializers.CharField(required=False, allow_blank=True, max_length=1000)
+
+    def validate_archivo(self, value):
+        """Valida el tamaño máximo del archivo (10MB)"""
+        max_size = 10 * 1024 * 1024  # 10MB
+        if value.size > max_size:
+            raise serializers.ValidationError(
+                "El archivo no debe exceder 10MB. Tamaño actual: {:.2f}MB".format(
+                    value.size / (1024 * 1024)
+                )
+            )
+        return value
+
+    def validate_codpaciente(self, value):
+        """Valida que el paciente exista"""
+        if not Paciente.objects.filter(codusuario=value).exists():
+            raise serializers.ValidationError("El paciente especificado no existe.")
+        return value
+
+    def validate(self, attrs):
+        """Validaciones adicionales a nivel de objeto"""
+        codpaciente = attrs.get('codpaciente')
+        idconsulta = attrs.get('idconsulta')
+        idhistorialclinico = attrs.get('idhistorialclinico')
+
+        # Si se proporciona consulta, validar que pertenezca al paciente
+        if idconsulta:
+            if not Consulta.objects.filter(
+                id=idconsulta,
+                codpaciente__codusuario=codpaciente
+            ).exists():
+                raise serializers.ValidationError(
+                    "La consulta especificada no pertenece al paciente."
+                )
+
+        # Si se proporciona historial, validar que pertenezca al paciente
+        if idhistorialclinico:
+            if not Historialclinico.objects.filter(
+                id=idhistorialclinico,
+                pacientecodigo__codusuario=codpaciente
+            ).exists():
+                raise serializers.ValidationError(
+                    "El historial clínico especificado no pertenece al paciente."
+                )
+
+        return attrs
