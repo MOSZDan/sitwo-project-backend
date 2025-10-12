@@ -364,13 +364,22 @@ from django.db import models
 
 
 class Tipodeusuario(models.Model):
-    rol = models.CharField(unique=True, max_length=100)
+    rol = models.CharField(max_length=100)
     descripcion = models.TextField(blank=True, null=True)
-    empresa = models.ForeignKey(Empresa, on_delete=models.CASCADE, related_name='tipos_usuario', null=True, blank=True)
+    empresa = models.ForeignKey(
+        Empresa, on_delete=models.CASCADE,
+        related_name='tipos_usuario', null=True, blank=True
+    )
 
     class Meta:
         # managed = False
         db_table = 'tipodeusuario'
+        constraints = [
+            models.UniqueConstraint(
+                fields=['empresa', 'rol'],
+                name='uq_tipousuario_empresa_rol'
+            )
+        ]
 
 
 class Tipopago(models.Model):
