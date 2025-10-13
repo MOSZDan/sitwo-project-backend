@@ -8,7 +8,7 @@ from django.db import migrations, models
 class Migration(migrations.Migration):
 
     dependencies = [
-        ('api', '0005_add_stripe_fields_to_empresa'),
+        ('api', '0008_alter_tipodeconsulta_unique_together'),
     ]
 
     operations = [

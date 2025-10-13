@@ -1,0 +1,680 @@
+{
+  "info": {
+    "name": "Dental SaaS Multi-Tenant API",
+    "description": "Colección completa de endpoints para el sistema SaaS multi-tenant de clínicas dentales",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "base_url",
+      "value": "http://localhost:8000/api",
+      "type": "string"
+    },
+    {
+      "key": "token",
+      "value": "",
+      "type": "string"
+    }
+  ],
+  "item": [
+    {
+      "name": "1. Endpoints Públicos (SaaS)",
+      "item": [
+        {
+          "name": "Validar Subdominio Disponible",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"subdomain\": \"mi-clinica-test\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/public/validar-subdomain/",
+              "host": ["{{base_url}}"],
+              "path": ["public", "validar-subdomain", ""]
+            }
+          }
+        },
+        {
+          "name": "Obtener Info del Sistema",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/public/info/",
+              "host": ["{{base_url}}"],
+              "path": ["public", "info", ""]
+            }
+          }
+        },
+        {
+          "name": "Registrar Empresa (Sin Pago)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"nombre_empresa\": \"Clínica Dental Test\",\n  \"subdomain\": \"test-clinica\",\n  \"nombre_admin\": \"Juan\",\n  \"apellido_admin\": \"Pérez\",\n  \"email_admin\": \"juan.test@example.com\",\n  \"telefono_admin\": \"+591 12345678\",\n  \"sexo_admin\": \"Masculino\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/public/registrar-empresa/",
+              "host": ["{{base_url}}"],
+              "path": ["public", "registrar-empresa", ""]
+            }
+          }
+        },
+        {
+          "name": "Verificar Empresa por Subdominio",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/public/empresa/test-clinica/",
+              "host": ["{{base_url}}"],
+              "path": ["public", "empresa", "test-clinica", ""]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "2. Stripe / Pagos",
+      "item": [
+        {
+          "name": "Crear Payment Intent",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"cliente@example.com\",\n  \"nombre_empresa\": \"Mi Clínica Dental\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/public/create-payment-intent/",
+              "host": ["{{base_url}}"],
+              "path": ["public", "create-payment-intent", ""]
+            }
+          }
+        },
+        {
+          "name": "Registrar Empresa con Pago",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"nombre_empresa\": \"Clínica con Pago\",\n  \"subdomain\": \"clinica-pago\",\n  \"nombre_admin\": \"María\",\n  \"apellido_admin\": \"González\",\n  \"email_admin\": \"maria@example.com\",\n  \"telefono_admin\": \"+591 87654321\",\n  \"sexo_admin\": \"Femenino\",\n  \"payment_method_id\": \"pm_xxx\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/public/registrar-empresa-pago/",
+              "host": ["{{base_url}}"],
+              "path": ["public", "registrar-empresa-pago", ""]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "3. Autenticación",
+      "item": [
+        {
+          "name": "Login",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "var jsonData = pm.response.json();",
+                  "if (jsonData.token) {",
+                  "    pm.environment.set(\"token\", jsonData.token);",
+                  "    pm.collectionVariables.set(\"token\", jsonData.token);",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"username\": \"juan.test@example.com\",\n  \"password\": \"tu-password-aqui\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/auth/login/",
+              "host": ["{{base_url}}"],
+              "path": ["auth", "login", ""]
+            }
+          }
+        },
+        {
+          "name": "Obtener Usuario Actual",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Token {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/auth/user/",
+              "host": ["{{base_url}}"],
+              "path": ["auth", "user", ""]
+            }
+          }
+        },
+        {
+          "name": "Logout",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Token {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/auth/logout/",
+              "host": ["{{base_url}}"],
+              "path": ["auth", "logout", ""]
+            }
+          }
+        },
+        {
+          "name": "Solicitar Reset de Contraseña",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"juan.test@example.com\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/auth/password-reset/",
+              "host": ["{{base_url}}"],
+              "path": ["auth", "password-reset", ""]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "4. Pacientes",
+      "item": [
+        {
+          "name": "Listar Pacientes",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Token {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/pacientes/",
+              "host": ["{{base_url}}"],
+              "path": ["pacientes", ""]
+            }
+          }
+        },
+        {
+          "name": "Crear Paciente",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Token {{token}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"nombre\": \"Pedro\",\n  \"apellido\": \"Ramírez\",\n  \"fechanacimiento\": \"1985-05-15\",\n  \"telefono\": \"+591 77777777\",\n  \"email\": \"pedro@example.com\",\n  \"direccion\": \"Av. Principal 123\",\n  \"sexo\": \"M\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/pacientes/",
+              "host": ["{{base_url}}"],
+              "path": ["pacientes", ""]
+            }
+          }
+        },
+        {
+          "name": "Obtener Paciente por ID",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Token {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/pacientes/1/",
+              "host": ["{{base_url}}"],
+              "path": ["pacientes", "1", ""]
+            }
+          }
+        },
+        {
+          "name": "Actualizar Paciente",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Token {{token}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"telefono\": \"+591 88888888\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/pacientes/1/",
+              "host": ["{{base_url}}"],
+              "path": ["pacientes", "1", ""]
+            }
+          }
+        },
+        {
+          "name": "Eliminar Paciente",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Token {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/pacientes/1/",
+              "host": ["{{base_url}}"],
+              "path": ["pacientes", "1", ""]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "5. Consultas / Citas",
+      "item": [
+        {
+          "name": "Listar Consultas",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Token {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/consultas/",
+              "host": ["{{base_url}}"],
+              "path": ["consultas", ""]
+            }
+          }
+        },
+        {
+          "name": "Crear Consulta",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Token {{token}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"paciente\": 1,\n  \"odontologo\": 1,\n  \"tipo_de_consulta\": 1,\n  \"fecha\": \"2025-01-15\",\n  \"hora\": \"10:00:00\",\n  \"descripcion\": \"Limpieza dental\",\n  \"estado\": 1\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/consultas/",
+              "host": ["{{base_url}}"],
+              "path": ["consultas", ""]
+            }
+          }
+        },
+        {
+          "name": "Obtener Consulta por ID",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Token {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/consultas/1/",
+              "host": ["{{base_url}}"],
+              "path": ["consultas", "1", ""]
+            }
+          }
+        },
+        {
+          "name": "Actualizar Consulta",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Token {{token}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"estado\": 2\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/consultas/1/",
+              "host": ["{{base_url}}"],
+              "path": ["consultas", "1", ""]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "6. Odontólogos",
+      "item": [
+        {
+          "name": "Listar Odontólogos",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Token {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/odontologos/",
+              "host": ["{{base_url}}"],
+              "path": ["odontologos", ""]
+            }
+          }
+        },
+        {
+          "name": "Crear Odontólogo",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Token {{token}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"nombre\": \"Dr. Carlos\",\n  \"apellido\": \"Méndez\",\n  \"especialidad\": \"Ortodoncia\",\n  \"telefono\": \"+591 66666666\",\n  \"email\": \"carlos@clinica.com\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/odontologos/",
+              "host": ["{{base_url}}"],
+              "path": ["odontologos", ""]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "7. Historias Clínicas",
+      "item": [
+        {
+          "name": "Listar Historias Clínicas",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Token {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/historias-clinicas/",
+              "host": ["{{base_url}}"],
+              "path": ["historias-clinicas", ""]
+            }
+          }
+        },
+        {
+          "name": "Crear Historia Clínica",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Token {{token}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"paciente\": 1,\n  \"fecha\": \"2025-01-12\",\n  \"diagnostico\": \"Caries en molar superior derecho\",\n  \"tratamiento\": \"Obturación dental\",\n  \"observaciones\": \"Paciente con sensibilidad dental\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/historias-clinicas/",
+              "host": ["{{base_url}}"],
+              "path": ["historias-clinicas", ""]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "8. Tipos de Consulta",
+      "item": [
+        {
+          "name": "Listar Tipos de Consulta",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Token {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/tipos-consulta/",
+              "host": ["{{base_url}}"],
+              "path": ["tipos-consulta", ""]
+            }
+          }
+        },
+        {
+          "name": "Crear Tipo de Consulta",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Token {{token}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"nombre\": \"Limpieza Dental\",\n  \"descripcion\": \"Limpieza profunda y profilaxis\",\n  \"duracion\": 60,\n  \"precio\": 150.00\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/tipos-consulta/",
+              "host": ["{{base_url}}"],
+              "path": ["tipos-consulta", ""]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "9. Usuarios (Admin)",
+      "item": [
+        {
+          "name": "Listar Usuarios",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Token {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/usuarios/",
+              "host": ["{{base_url}}"],
+              "path": ["usuarios", ""]
+            }
+          }
+        },
+        {
+          "name": "Crear Usuario",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Token {{token}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"nombre\": \"Ana\",\n  \"apellido\": \"López\",\n  \"correoelectronico\": \"ana@clinica.com\",\n  \"telefono\": \"+591 55555555\",\n  \"idtipousuario\": 2,\n  \"password\": \"password123\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/usuarios/",
+              "host": ["{{base_url}}"],
+              "path": ["usuarios", ""]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "10. Bitácora (Auditoría)",
+      "item": [
+        {
+          "name": "Listar Bitácora",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Token {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/bitacora/",
+              "host": ["{{base_url}}"],
+              "path": ["bitacora", ""]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "11. Health Checks",
+      "item": [
+        {
+          "name": "Health Check",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/health/",
+              "host": ["{{base_url}}"],
+              "path": ["health", ""]
+            }
+          }
+        },
+        {
+          "name": "DB Info",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/db/",
+              "host": ["{{base_url}}"],
+              "path": ["db", ""]
+            }
+          }
+        },
+        {
+          "name": "Users Count",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/users/count/",
+              "host": ["{{base_url}}"],
+              "path": ["users", "count", ""]
+            }
+          }
+        }
+      ]
+    }
+  ]
+}

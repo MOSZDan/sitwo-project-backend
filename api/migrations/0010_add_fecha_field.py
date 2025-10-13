@@ -7,7 +7,7 @@ from django.db import migrations, models
 class Migration(migrations.Migration):
 
     dependencies = [
-        ('api', '0009_estado_estadodeconsulta'),
+        ('api', '0009_documentoclinico'),
     ]
 
     operations = [

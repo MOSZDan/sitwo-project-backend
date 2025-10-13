@@ -11,21 +11,22 @@ class _ConfigError(RuntimeError):
 
 @lru_cache(maxsize=1)
 def get_fcm_project_id() -> str:
-    try:
-        return os.environ["FCM_PROJECT_ID"].strip()
-    except KeyError as e:
-        raise _ConfigError("Falta variable de entorno FCM_PROJECT_ID") from e
+    """
+    Devuelve el FCM_PROJECT_ID desde las variables de entorno.
+    Retorna None si no está configurado (FCM es opcional).
+    """
+    return os.environ.get("FCM_PROJECT_ID", "").strip() or None
 
 
 @lru_cache(maxsize=1)
 def get_fcm_sa_info() -> dict:
     """
     Devuelve el dict del service-account.json decodificado desde FCM_SA_JSON_B64.
+    Retorna None si no está configurado (FCM es opcional).
     """
-    try:
-        b64 = os.environ["FCM_SA_JSON_B64"]
-    except KeyError as e:
-        raise _ConfigError("Falta variable de entorno FCM_SA_JSON_B64") from e
+    b64 = os.environ.get("FCM_SA_JSON_B64", "").strip()
+    if not b64:
+        return None
 
     try:
         raw = base64.b64decode(b64).decode("utf-8")
