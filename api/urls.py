@@ -25,6 +25,9 @@ router.register(r'bitacora', views.BitacoraViewSet, basename='bitacora')
 # 👇 NUEVO: Historias Clínicas (HCE)
 router.register(r"historias-clinicas", views.HistorialclinicoViewSet, basename="historias-clinicas")
 
+# 👇 NUEVO: Consentimiento Digital
+router.register(r"consentimientos", views.ConsentimientoViewSet, basename="consentimientos")
+
 urlpatterns = [
     path("health/", views.health),
     path("db/", views.db_info),
@@ -72,4 +75,5 @@ urlpatterns = [
 
     # Rutas de los viewsets (router incluido solo una vez)
     path("", include(router.urls)),
+    path("mobile-notif/", include("api.notifications_mobile.urls")),
 ]

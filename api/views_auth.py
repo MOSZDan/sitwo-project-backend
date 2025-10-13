@@ -118,7 +118,8 @@ def auth_register(request):
       3) Crea subtipo 1-1 según 'rol' (default: paciente).
     """
     try:
-        ser = RegisterSerializer(data=request.data)
+        # Pasar el request como contexto al serializer para multi-tenancy
+        ser = RegisterSerializer(data=request.data, context={'request': request})
         ser.is_valid(raise_exception=True)
         data = ser.validated_data
 
@@ -142,7 +143,7 @@ def auth_register(request):
                 existing_user = User.objects.get(username=email)
                 return Response(
                     {"detail": "Ya existe un usuario con este email"},
-                    status=status.HTTP_400_BAD_REQUEST
+                    status=status.HTTP_409_CONFLICT
                 )
             except User.DoesNotExist:
                 pass  # Correcto, el usuario no existe

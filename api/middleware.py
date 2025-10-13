@@ -36,26 +36,48 @@ def get_client_ip(request):
 
 def get_usuario_from_request(request):
     """Obtiene el usuario de negocio (Usuario) desde el request"""
-    if hasattr(request, 'user') and request.user.is_authenticated:
-        try:
+    try:
+        # Verificar si hay token en el header
+        auth_header = request.META.get('HTTP_AUTHORIZATION', '')
+        if auth_header.startswith('Token '):
+            from rest_framework.authtoken.models import Token
+            token_key = auth_header.split(' ')[1]
+            try:
+                token = Token.objects.select_related('user').get(key=token_key)
+                request.user = token.user
+                print(f"[Token] Usuario autenticado: {token.user}")
+            except Token.DoesNotExist:
+                print("[Token] Token no encontrado")
+                return None
+
+        if hasattr(request, 'user') and request.user.is_authenticated:
+            print(f"[Auth] Usuario autenticado: {request.user}")
+            # Primero intentar por correo electrónico
             email = getattr(request.user, 'email', None) or getattr(request.user, 'username', '')
             if email:
-                return Usuario.objects.filter(correoelectronico__iexact=email.strip().lower()).first()
-        except Usuario.DoesNotExist:
-            pass
-    return None
+                usuario = Usuario.objects.select_related('empresa').filter(
+                    correoelectronico__iexact=email.strip().lower()
+                ).first()
+                if usuario:
+                    print(f"[Usuario encontrado] Email: {email}, Empresa: {usuario.empresa}")
+                    return usuario
+                else:
+                    print(f"[Usuario no encontrado] Email: {email}")
+
+        print("[Auth] Usuario no autenticado o no encontrado")
+        return None
+    except Exception as e:
+        print(f"[Error] Excepción en get_usuario_from_request: {str(e)}")
+        return None
 
 
 class TenantMiddleware(MiddlewareMixin):
     """
     Middleware para identificar y establecer el tenant/empresa actual.
     Prioridad de identificación:
-    1. Header HTTP X-Tenant-Subdomain
+    1. Usuario autenticado (empresa del usuario)
     2. Header HTTP X-Tenant-ID
-    3. Subdominio de la URL
-    4. Usuario autenticado (empresa del usuario)
-
-    IMPORTANTE: Los endpoints públicos (/api/public/*) NO requieren tenant.
+    3. Subdominio
     """
 
     def process_request(self, request):
@@ -75,14 +97,39 @@ class TenantMiddleware(MiddlewareMixin):
             return
 
         empresa = None
+        print("\n=== TenantMiddleware processing request ===")
+        print(f"Path: {request.path}")
+        print(f"Headers: {request.headers.get('Authorization', 'No Auth header')}")
 
-        # Opción 1: Por header HTTP X-Tenant-Subdomain (enviado desde frontend)
-        tenant_subdomain = request.META.get('HTTP_X_TENANT_SUBDOMAIN')
-        if tenant_subdomain:
-            try:
-                empresa = Empresa.objects.get(subdomain__iexact=tenant_subdomain, activo=True)
-            except Empresa.DoesNotExist:
-                pass
+        # Si es una ruta de autenticación, no requerimos tenant
+        if request.path.startswith('/api/auth/'):
+            print("Ruta de autenticación - No se requiere tenant")
+            return None
+
+        # Si hay token, intentar autenticar al usuario
+        auth_header = request.META.get('HTTP_AUTHORIZATION', '')
+        if auth_header.startswith('Token '):
+            print("[Auth] Token encontrado, procesando...")
+        else:
+            print("[Auth] No se encontró token válido")
+
+        # Opción 1: Por usuario autenticado (principal método)
+        if getattr(request.user, 'is_authenticated', False):
+            usuario = get_usuario_from_request(request)
+            if usuario and usuario.empresa:
+                empresa = usuario.empresa
+                print(f"Tenant encontrado por usuario: {empresa}")
+
+        # Opción 2: Por header HTTP X-Tenant-Subdomain
+        if not empresa:
+            tenant_subdomain = request.META.get('HTTP_X_TENANT_SUBDOMAIN')
+            if tenant_subdomain:
+                try:
+                    empresa = Empresa.objects.get(subdomain__iexact=tenant_subdomain, activo=True)
+                    print(f"Tenant encontrado por subdomain: {empresa}")
+                except Empresa.DoesNotExist:
+                    print(f"No se encontró tenant para subdomain: {tenant_subdomain}")
+                    pass
 
         # Opción 2: Por header HTTP X-Tenant-ID
         if not empresa:
@@ -115,6 +162,46 @@ class TenantMiddleware(MiddlewareMixin):
         # Guardar la empresa en el request para uso posterior
         request.tenant = empresa
         request.tenant_id = empresa.id if empresa else None
+
+        # Intentar obtener el usuario y su empresa
+        usuario = get_usuario_from_request(request)
+        if usuario and usuario.empresa:
+            empresa = usuario.empresa
+            print(f"✅ Empresa encontrada por usuario: {empresa}")
+
+        # Si no se encontró empresa por usuario, intentar por headers
+        if not empresa:
+            tenant_id = request.META.get('HTTP_X_TENANT_ID')
+            if tenant_id:
+                try:
+                    empresa = Empresa.objects.get(id=tenant_id)
+                    print(f"✅ Empresa encontrada por header: {empresa}")
+                except Empresa.DoesNotExist:
+                    print(f"❌ No se encontró empresa con ID: {tenant_id}")
+
+        # Asignar la empresa al request
+        request.tenant = empresa
+        request.tenant_id = empresa.id if empresa else None
+
+        # Para endpoints que requieren tenant, asegurarse de que exista
+        if request.path.startswith('/api/') and not request.path.startswith('/api/auth/'):
+            if not empresa:
+                print("❌ Error: No se pudo determinar el tenant")
+                from django.http import JsonResponse
+                return JsonResponse({
+                    'error': 'No se pudo determinar la empresa',
+                    'detail': 'Se requiere un tenant válido para esta operación',
+                    'debug_info': {
+                        'path': request.path,
+                        'token': bool(auth_header.startswith('Token ')),
+                        'email': getattr(request.user, 'email', None),
+                        'headers': dict(request.headers)
+                    }
+                }, status=400)
+            else:
+                print(f"✅ Tenant configurado correctamente: {empresa}")
+
+        return None
 
 
 class AuditMiddleware(MiddlewareMixin):
@@ -183,16 +270,17 @@ class AuditMiddleware(MiddlewareMixin):
                 if not empresa and usuario and usuario.empresa:
                     empresa = usuario.empresa
 
+                from django.utils import timezone
+                
                 Bitacora.objects.create(
                     accion=accion,
-                    descripcion=descripcion,
                     usuario=usuario,
-                    empresa=empresa,  # Agregar empresa
+                    empresa=empresa,
                     ip_address=ip_address,
                     user_agent=user_agent,
-                    modelo_afectado=modelo_afectado,
-                    objeto_id=objeto_id,
-                    datos_adicionales={
+                    tabla_afectada=modelo_afectado,
+                    registro_id=objeto_id,
+                    valores_anteriores={
                         'path': path,
                         'method': method,
                         'status_code': response.status_code,
