@@ -1,4 +1,5 @@
 # api/services/notification_service.py
+from api.notifications_mobile.config import get_fcm_project_id, get_fcm_sa_info
 import logging
 from typing import List, Dict, Any, Optional
 from datetime import datetime
@@ -15,6 +16,8 @@ from ..models_notifications import (
     DispositivoMovil, HistorialNotificacion, PlantillaNotificacion
 )
 logger = logging.getLogger(__name__)
+from api.notifications_mobile.utils import mobile_send_push_fcm
+
 
 
 class NotificationService:
@@ -29,6 +32,8 @@ class NotificationService:
         self.onesignal_rest_key = getattr(settings, 'ONESIGNAL_REST_API_KEY', None)
         self.expo_access_token = getattr(settings, 'EXPO_ACCESS_TOKEN', None)
         self.supabase_edge_url = getattr(settings, 'SUPABASE_EDGE_FUNCTION_URL', None)
+        self.fcm_project_id = get_fcm_project_id()
+        self.fcm_sa_json = get_fcm_sa_info()
 
     def enviar_notificacion(
             self,
@@ -360,8 +365,10 @@ Puedes cambiar tus preferencias de notificación en: {settings.FRONTEND_URL}
             historial: HistorialNotificacion
     ) -> bool:
         """
-        Envía notificación push usando diferentes servicios
+        Envía notificación push usando el primer proveedor disponible:
+        OneSignal → Expo → Supabase → FCM (HTTP v1).
         """
+        # Dispositivos activos del usuario
         dispositivos = DispositivoMovil.objects.filter(usuario=usuario, activo=True)
 
         if not dispositivos.exists():
@@ -369,17 +376,68 @@ Puedes cambiar tus preferencias de notificación en: {settings.FRONTEND_URL}
             historial.error_mensaje = "No hay dispositivos móviles registrados"
             return False
 
-        # Intentar diferentes servicios de push
+        # Proveedores (orden de prioridad)
         if self.onesignal_app_id and self.onesignal_rest_key:
             return self._enviar_push_onesignal(dispositivos, titulo, mensaje, datos_adicionales, historial)
-        elif self.expo_access_token:
+
+        if self.expo_access_token:
             return self._enviar_push_expo(dispositivos, titulo, mensaje, datos_adicionales, historial)
-        elif self.supabase_edge_url:
+
+        if self.supabase_edge_url:
             return self._enviar_push_supabase(dispositivos, titulo, mensaje, datos_adicionales, historial)
-        else:
-            logger.error("No hay servicio de push notifications configurado")
-            historial.error_mensaje = "No hay servicio de push notifications configurado"
+
+        # 🔹 FCM HTTP v1 como fallback
+        if self.fcm_project_id and self.fcm_sa_json:
+            tokens = [d.token_fcm for d in dispositivos if d.token_fcm]
+            return self._enviar_push_fcm(tokens, titulo, mensaje, datos_adicionales, historial)
+
+        # Si no hay ningún proveedor configurado
+        logger.error("No hay servicio de push notifications configurado")
+        historial.error_mensaje = "No hay servicio de push notifications configurado"
+        return False
+
+
+    def _enviar_push_fcm(
+            self,
+            tokens: List[str],
+            titulo: str,
+            mensaje: str,
+            datos_adicionales: Optional[Dict[str, Any]],
+            historial: HistorialNotificacion
+    ) -> bool:
+        """
+        Envío de push con Firebase Cloud Messaging (HTTP v1) usando el submódulo notifications_mobile.
+        No colisiona con el resto de canales.
+        """
+        try:
+            if not self.fcm_project_id or not self.fcm_sa_json:
+                historial.error_mensaje = "FCM no configurado (faltan FCM_PROJECT_ID o FCM_SERVICE_ACCOUNT_JSON)"
+                return False
+
+            tokens_validos = [t for t in tokens if t]
+            if not tokens_validos:
+                historial.error_mensaje = "No hay tokens FCM válidos"
+                return False
+
+            result = mobile_send_push_fcm(
+                tokens=tokens_validos,
+                title=titulo,
+                body=mensaje,
+                data=datos_adicionales or {},
+                android_channel_id="smilestudio_default",
+            )
+
+            if result.get("sent", 0) > 0 and not result.get("errors"):
+                return True
+
+            errores = "; ".join(result.get("errors", []))[:500]
+            historial.error_mensaje = f"FCM errors: {errores}" if errores else "FCM no envió mensajes"
+            return result.get("sent", 0) > 0
+
+        except Exception as e:
+            historial.error_mensaje = f"FCM exception: {str(e)}"
             return False
+
 
     def _enviar_push_onesignal(
             self,

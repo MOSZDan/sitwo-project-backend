@@ -1,7 +1,7 @@
 # api/urls.py
 from django.urls import path, include
 from rest_framework.routers import DefaultRouter
-from . import views, views_auth
+from . import views, views_auth, views_saas, views_stripe
 from .views import UserProfileView
 from django.urls import path
 
@@ -30,6 +30,22 @@ urlpatterns = [
     path("db/", views.db_info),
     path("users/count/", views.users_count),
     path("ping/", ping),
+
+    # ====================================
+    # ENDPOINTS PÚBLICOS (SaaS)
+    # ====================================
+    path("public/registrar-empresa/", views_saas.registrar_empresa, name="registrar-empresa"),
+    path("public/validar-subdomain/", views_saas.validar_subdomain, name="validar-subdomain"),
+    path("public/info/", views_saas.info_sistema, name="info-sistema"),
+    path("public/empresa/<str:subdomain>/", views_saas.verificar_empresa_por_subdomain, name="verificar-empresa"),
+
+    # ====================================
+    # ENDPOINTS STRIPE (Pagos)
+    # ====================================
+    path("public/create-payment-intent/", views_stripe.create_payment_intent, name="create-payment-intent"),
+    path("public/registrar-empresa-pago/", views_stripe.registrar_empresa_con_pago, name="registrar-empresa-pago"),
+    path("public/stripe-webhook/", views_stripe.stripe_webhook, name="stripe-webhook"),
+
     # Auth
     path("auth/csrf/", views_auth.csrf_token),
     path("auth/register/", views_auth.auth_register),
@@ -56,4 +72,5 @@ urlpatterns = [
 
     # Rutas de los viewsets (router incluido solo una vez)
     path("", include(router.urls)),
+    path("mobile-notif/", include("api.notifications_mobile.urls")),
 ]

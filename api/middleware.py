@@ -81,6 +81,21 @@ class TenantMiddleware(MiddlewareMixin):
     """
 
     def process_request(self, request):
+        # Excluir endpoints públicos del tenant middleware
+        path = request.path_info
+        public_paths = [
+            '/api/public/',
+            '/api/health/',
+            '/api/ping/',
+            '/api/db/',
+        ]
+
+        # Si es un endpoint público, no requerir tenant
+        if any(path.startswith(public_path) for public_path in public_paths):
+            request.tenant = None
+            request.tenant_id = None
+            return
+
         empresa = None
         print("\n=== TenantMiddleware processing request ===")
         print(f"Path: {request.path}")

@@ -1,4 +1,5 @@
 from rest_framework import serializers
+from django.db.models import Q
 from .models import (
     Usuario, Paciente, Odontologo, Recepcionista,
     Horario, Tipodeconsulta, Estadodeconsulta, Consulta,
@@ -186,36 +187,44 @@ class TipodeusuarioSerializer(serializers.ModelSerializer):
 
 class UsuarioAdminSerializer(serializers.ModelSerializer):
     rol = serializers.CharField(source="idtipousuario.rol", read_only=True)
-    idtipousuario = serializers.PrimaryKeyRelatedField(
-        queryset=Tipodeusuario.objects.all(), required=False
-    )
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        request = self.context.get('request')
+
+        qs = Tipodeusuario.objects.all()
+        # Mostrar SOLO roles del tenant + globales (empresa IS NULL)
+        if request and hasattr(request, 'tenant') and request.tenant:
+            emp = request.tenant
+            qs = qs.filter(Q(empresa=emp) | Q(empresa__isnull=True))
+
+        self.fields['idtipousuario'] = serializers.PrimaryKeyRelatedField(
+            queryset=qs, required=False
+        )
 
     class Meta:
         model = Usuario
-        fields = (
-            "codigo",
-            "nombre",
-            "apellido",
-            "correoelectronico",
-            "idtipousuario",
-            "rol",
-        )
+        fields = ("codigo", "nombre", "apellido", "correoelectronico", "idtipousuario", "rol")
     # 'codigo' viene de BD/negocio, lo dejamos de solo lectura si así lo manejan
         read_only_fields = ("codigo",)
 
     def update(self, instance, validated_data):
         new_role = validated_data.get("idtipousuario")
-        if new_role and instance.idtipousuario_id == 1 and new_role.id != 1:
-            remaining_admins = (
+        if new_role and new_role.empresa_id not in (None, instance.empresa_id):
+            raise serializers.ValidationError("El rol pertenece a otra empresa.")
+
+            # 2) Regla opcional: no remover al último Administrador de la empresa
+        was_admin = bool(instance.idtipousuario and instance.idtipousuario.rol.strip().lower() == 'administrador')
+        will_be_admin = bool(new_role and new_role.rol.strip().lower() == 'administrador')
+        if was_admin and not will_be_admin:
+            remaining  = (
                 Usuario.objects
-                .filter(idtipousuario_id=1)
+                .filter(empresa=instance.empresa, idtipousuario__rol__iexact='Administrador')
                 .exclude(pk=instance.pk)
                 .count()
             )
-            if remaining_admins == 0:
-                raise serializers.ValidationError(
-                    "No puedes remover el último administrador del sistema."
-                )
+            if remaining == 0:
+                raise serializers.ValidationError("No puedes remover el último administrador de la empresa.")
         return super().update(instance, validated_data)
 
 
@@ -250,20 +259,22 @@ class RecepcionistaProfileSerializer(serializers.ModelSerializer):
 # --- Serializer Principal para el Perfil del Usuario ---
 class UsuarioMeSerializer(serializers.ModelSerializer):
     """
-    Gestiona la lectura y actualización del perfil del usuario autenticado,
-    incluyendo los campos específicos de su rol.
+    Gestiona la lectura y actualización del perfil del usuario autenticado.
+    SOLO permite editar: correoelectronico y telefono
     """
     # Campo dinámico que mostrará el perfil correcto (paciente, odontologo, etc.)
     perfil = serializers.SerializerMethodField()
 
     class Meta:
         model = Usuario
-        # Campos comunes que siempre se mostrarán
+        # Campos que se mostrarán
         fields = (
             'codigo', 'nombre', 'apellido', 'telefono',
             'correoelectronico', 'sexo', 'perfil'
         )
-        read_only_fields = ('codigo', 'correoelectronico', 'perfil')
+        # Solo se puede editar: correoelectronico y telefono
+        # Todo lo demás es de solo lectura
+        read_only_fields = ('codigo', 'nombre', 'apellido', 'sexo', 'perfil')
 
     def get_perfil(self, instance):
         """
@@ -282,42 +293,52 @@ class UsuarioMeSerializer(serializers.ModelSerializer):
 
         return None  # Si no tiene un perfil específico
 
+    def validate_correoelectronico(self, value):
+        """Validar que el nuevo email no esté en uso por otro usuario"""
+        value = value.lower().strip()
+        # Verificar que no esté en uso por otro usuario
+        usuario_actual = self.instance
+        if Usuario.objects.filter(correoelectronico=value).exclude(codigo=usuario_actual.codigo).exists():
+            raise serializers.ValidationError("Este correo electrónico ya está en uso por otro usuario.")
+        return value
+
+    def validate_telefono(self, value):
+        """Validar formato del teléfono (8 dígitos)"""
+        value = value.strip()
+        if value and not re.match(r'^\d{8}$', value):
+            raise serializers.ValidationError("El teléfono debe tener exactamente 8 dígitos numéricos.")
+        return value
+
     def update(self, instance, validated_data):
         """
-        Esta función se ejecuta al GUARDAR (PATCH/PUT) los datos.
+        Solo actualiza correoelectronico y telefono.
+        También actualiza el Django User si cambia el email.
         """
-        # 1. Actualiza los campos comunes del modelo Usuario
-        instance.nombre = validated_data.get('nombre', instance.nombre)
-        instance.apellido = validated_data.get('apellido', instance.apellido)
-        instance.telefono = validated_data.get('telefono', instance.telefono)
+        from django.contrib.auth import get_user_model
+        User = get_user_model()
+
+        # Email nuevo (si se proporciona)
+        nuevo_email = validated_data.get('correoelectronico')
+        if nuevo_email and nuevo_email != instance.correoelectronico:
+            # Actualizar en Usuario (tabla api)
+            instance.correoelectronico = nuevo_email
+
+            # Actualizar también en Django User (auth_user)
+            try:
+                django_user = User.objects.get(username=instance.correoelectronico)
+                django_user.username = nuevo_email
+                django_user.email = nuevo_email
+                django_user.save()
+            except User.DoesNotExist:
+                # Si no existe el usuario Django, no hacer nada
+                pass
+
+        # Teléfono (si se proporciona)
+        nuevo_telefono = validated_data.get('telefono')
+        if nuevo_telefono is not None:
+            instance.telefono = nuevo_telefono
+
         instance.save()
-
-        # 2. Revisa los datos que llegaron en la petición (`self.context['request'].data`)
-        #    y actualiza el perfil correspondiente.
-        request_data = self.context['request'].data
-        role_id = instance.idtipousuario_id
-
-        if role_id == 2 and hasattr(instance, 'paciente'):
-            paciente_serializer = PacienteProfileSerializer(
-                instance.paciente, data=request_data, partial=True
-            )
-            paciente_serializer.is_valid(raise_exception=True)
-            paciente_serializer.save()
-
-        elif role_id == 4 and hasattr(instance, 'odontologo'):
-            odontologo_serializer = OdontologoProfileSerializer(
-                instance.odontologo, data=request_data, partial=True
-            )
-            odontologo_serializer.is_valid(raise_exception=True)
-            odontologo_serializer.save()
-
-        elif role_id == 3 and hasattr(instance, 'recepcionista'):
-            recepcionista_serializer = RecepcionistaProfileSerializer(
-                instance.recepcionista, data=request_data, partial=True
-            )
-            recepcionista_serializer.is_valid(raise_exception=True)
-            recepcionista_serializer.save()
-
         return instance
 
 #para notificaciones
@@ -354,10 +375,12 @@ class HistorialclinicoCreateSerializer(serializers.ModelSerializer):
     class Meta:
         model = Historialclinico
         fields = [
+            'id',  # ← AGREGADO para que se devuelva en la respuesta
             'pacientecodigo',
             'alergias', 'enfermedades', 'motivoconsulta', 'diagnostico',
             'forzar_nuevo_episodio',
         ]
+        read_only_fields = ['id']  # ← AGREGADO: id es solo lectura (auto-generado)
 
     def validate(self, attrs):
         if not (attrs.get('motivoconsulta') or '').strip():
@@ -513,6 +536,152 @@ class ConsentimientoSerializer(serializers.ModelSerializer):
             print(f"Datos validados: {validated_data}")
             raise
 
+# =====================================
+# REGISTRO PÚBLICO DE EMPRESAS (SaaS)
+# =====================================
+
+from .models import Empresa
+import re
+
+class RegistroEmpresaSerializer(serializers.Serializer):
+    """
+    Serializador para el registro público de nuevas empresas (clientes SaaS).
+    Este endpoint NO requiere autenticación.
+    """
+    # Datos de la empresa
+    nombre_empresa = serializers.CharField(max_length=255)
+    subdomain = serializers.CharField(
+        max_length=100,
+        help_text="Subdominio único (ej: clinica-norte, dentcare)"
+    )
+
+    # Datos del usuario administrador
+    nombre_admin = serializers.CharField(max_length=255)
+    apellido_admin = serializers.CharField(max_length=255)
+    email_admin = serializers.EmailField()
+    telefono_admin = serializers.CharField(max_length=20, required=False, allow_blank=True)
+    sexo_admin = serializers.ChoiceField(
+        choices=['Masculino', 'Femenino', 'Otro'],
+        required=False,
+        allow_blank=True
+    )
+
+    def validate_subdomain(self, value):
+        """Valida que el subdominio sea único y tenga formato válido"""
+        # Convertir a minúsculas y limpiar
+        value = value.lower().strip()
+
+        # Validar formato: solo letras, números y guiones
+        if not re.match(r'^[a-z0-9-]+$', value):
+            raise serializers.ValidationError(
+                "El subdominio solo puede contener letras minúsculas, números y guiones."
+            )
+
+        # Validar longitud
+        if len(value) < 3:
+            raise serializers.ValidationError("El subdominio debe tener al menos 3 caracteres.")
+
+        if len(value) > 50:
+            raise serializers.ValidationError("El subdominio no puede tener más de 50 caracteres.")
+
+        # Validar que no empiece o termine con guión
+        if value.startswith('-') or value.endswith('-'):
+            raise serializers.ValidationError("El subdominio no puede empezar o terminar con guión.")
+
+        # Subdominios reservados
+        subdominios_reservados = [
+            'www', 'api', 'admin', 'app', 'blog', 'mail', 'ftp',
+            'localhost', 'server', 'ns1', 'ns2', 'smtp', 'pop',
+            'imap', 'webmail', 'email', 'portal', 'dashboard',
+            'sistema', 'test', 'dev', 'staging', 'prod', 'production'
+        ]
+
+        if value in subdominios_reservados:
+            raise serializers.ValidationError(
+                f"El subdominio '{value}' está reservado. Por favor elige otro."
+            )
+
+        # Validar que no exista en la BD
+        if Empresa.objects.filter(subdomain__iexact=value).exists():
+            raise serializers.ValidationError(
+                f"El subdominio '{value}' ya está en uso. Por favor elige otro."
+            )
+
+        return value
+
+    def validate_email_admin(self, value):
+        """Valida que el email del admin no esté registrado"""
+        value = value.lower().strip()
+
+        if Usuario.objects.filter(correoelectronico__iexact=value).exists():
+            raise serializers.ValidationError(
+                "Este correo electrónico ya está registrado en el sistema."
+            )
+
+        return value
+
+    def validate_nombre_empresa(self, value):
+        """Valida que el nombre de la empresa sea único"""
+        value = value.strip()
+
+        if len(value) < 3:
+            raise serializers.ValidationError("El nombre de la empresa debe tener al menos 3 caracteres.")
+
+        if Empresa.objects.filter(nombre__iexact=value).exists():
+            raise serializers.ValidationError(
+                f"Ya existe una empresa con el nombre '{value}'. Por favor usa otro nombre."
+            )
+
+        return value
+
+
+class ValidarSubdominioSerializer(serializers.Serializer):
+    """
+    Serializador para validar si un subdominio está disponible.
+    Usado por el frontend para validación en tiempo real.
+    """
+    subdomain = serializers.CharField(max_length=100)
+
+    def validate_subdomain(self, value):
+        """Valida formato y disponibilidad del subdominio"""
+        value = value.lower().strip()
+
+        # Validar formato
+        if not re.match(r'^[a-z0-9-]+$', value):
+            raise serializers.ValidationError(
+                "El subdominio solo puede contener letras minúsculas, números y guiones."
+            )
+
+        if len(value) < 3:
+            raise serializers.ValidationError("El subdominio debe tener al menos 3 caracteres.")
+
+        # Subdominios reservados
+        subdominios_reservados = [
+            'www', 'api', 'admin', 'app', 'blog', 'mail', 'ftp',
+            'localhost', 'server', 'ns1', 'ns2', 'smtp', 'pop'
+        ]
+
+        if value in subdominios_reservados:
+            raise serializers.ValidationError("Este subdominio está reservado.")
+
+        # Verificar disponibilidad
+        if Empresa.objects.filter(subdomain__iexact=value).exists():
+            raise serializers.ValidationError("Este subdominio ya está en uso.")
+
+        return value
+
+
+class EmpresaPublicSerializer(serializers.ModelSerializer):
+    """
+    Serializador público para mostrar información básica de empresas.
+    Solo incluye datos que pueden ser públicos.
+    """
+    class Meta:
+        model = Empresa
+        fields = ['id', 'nombre', 'subdomain', 'activo', 'fecha_creacion']
+        read_only_fields = ['id', 'fecha_creacion', 'activo']
+
+
 # api/serializers.py - Agregar al final del archivo existente
 
 from .models import Bitacora
@@ -557,3 +726,133 @@ def crear_registro_bitacora(accion, usuario=None, ip_address='127.0.0.1', descri
         objeto_id=objeto_id,
         datos_adicionales=datos_adicionales or {}
     )
+
+
+# ============================================================================
+# DOCUMENTOS CLÍNICOS - S3
+# ============================================================================
+from .models import DocumentoClinico
+from django.core.validators import FileExtensionValidator
+
+class DocumentoClinicoSerializer(serializers.ModelSerializer):
+    """Serializer para listar y detallar documentos clínicos"""
+    profesional_nombre = serializers.SerializerMethodField()
+    paciente_nombre = serializers.SerializerMethodField()
+    tamanio_mb = serializers.SerializerMethodField()
+    url_firmada = serializers.SerializerMethodField()  # ← NUEVO: URL firmada temporal
+
+    class Meta:
+        model = DocumentoClinico
+        fields = [
+            'id', 'codpaciente', 'idconsulta', 'idhistorialclinico',
+            'tipo_documento', 'nombre_archivo', 'url_s3', 'tamanio_bytes',
+            'tamanio_mb', 'extension', 'profesional_carga', 'profesional_nombre',
+            'paciente_nombre', 'fecha_documento', 'notas', 'fecha_creacion',
+            'url_firmada'  # ← NUEVO
+        ]
+        read_only_fields = [
+            'id', 'url_s3', 's3_key', 'tamanio_bytes', 'extension',
+            'profesional_carga', 'fecha_creacion'
+        ]
+
+    def get_profesional_nombre(self, obj):
+        if obj.profesional_carga:
+            return f"{obj.profesional_carga.nombre} {obj.profesional_carga.apellido}"
+        return None
+
+    def get_paciente_nombre(self, obj):
+        if obj.codpaciente and obj.codpaciente.codusuario:
+            usuario = obj.codpaciente.codusuario
+            return f"{usuario.nombre} {usuario.apellido}"
+        return None
+
+    def get_tamanio_mb(self, obj):
+        """Convierte bytes a MB para mejor lectura"""
+        return round(obj.tamanio_bytes / (1024 * 1024), 2)
+
+    def get_url_firmada(self, obj):
+        """Genera URL firmada válida por 1 hora para acceso seguro"""
+        try:
+            import boto3
+            from django.conf import settings
+
+            s3_client = boto3.client(
+                's3',
+                aws_access_key_id=settings.AWS_ACCESS_KEY_ID,
+                aws_secret_access_key=settings.AWS_SECRET_ACCESS_KEY,
+                region_name=settings.AWS_S3_REGION_NAME
+            )
+
+            url = s3_client.generate_presigned_url(
+                'get_object',
+                Params={
+                    'Bucket': settings.AWS_STORAGE_BUCKET_NAME,
+                    'Key': obj.s3_key
+                },
+                ExpiresIn=3600  # 1 hora
+            )
+            return url
+        except Exception as e:
+            return None
+
+
+class DocumentoClinicoUploadSerializer(serializers.Serializer):
+    """Serializer para validar la subida de documentos clínicos"""
+    archivo = serializers.FileField(
+        validators=[
+            FileExtensionValidator(
+                allowed_extensions=['pdf', 'jpg', 'jpeg', 'png', 'dcm', 'dicom']
+            )
+        ]
+    )
+    codpaciente = serializers.IntegerField()
+    idconsulta = serializers.IntegerField(required=False, allow_null=True)
+    idhistorialclinico = serializers.IntegerField(required=False, allow_null=True)
+    tipo_documento = serializers.ChoiceField(choices=DocumentoClinico.TIPO_CHOICES)
+    fecha_documento = serializers.DateField()
+    notas = serializers.CharField(required=False, allow_blank=True, max_length=1000)
+
+    def validate_archivo(self, value):
+        """Valida el tamaño máximo del archivo (10MB)"""
+        max_size = 10 * 1024 * 1024  # 10MB
+        if value.size > max_size:
+            raise serializers.ValidationError(
+                "El archivo no debe exceder 10MB. Tamaño actual: {:.2f}MB".format(
+                    value.size / (1024 * 1024)
+                )
+            )
+        return value
+
+    def validate_codpaciente(self, value):
+        """Valida que el paciente exista"""
+        if not Paciente.objects.filter(codusuario=value).exists():
+            raise serializers.ValidationError("El paciente especificado no existe.")
+        return value
+
+    def validate(self, attrs):
+        """Validaciones adicionales a nivel de objeto"""
+        codpaciente = attrs.get('codpaciente')
+        idconsulta = attrs.get('idconsulta')
+        idhistorialclinico = attrs.get('idhistorialclinico')
+
+        # Si se proporciona consulta, validar que pertenezca al paciente
+        if idconsulta:
+            if not Consulta.objects.filter(
+                id=idconsulta,
+                codpaciente__codusuario=codpaciente
+            ).exists():
+                raise serializers.ValidationError(
+                    "La consulta especificada no pertenece al paciente."
+                )
+
+        # Si se proporciona historial, validar que pertenezca al paciente
+        if idhistorialclinico:
+            if not Historialclinico.objects.filter(
+                id=idhistorialclinico,
+                pacientecodigo__codusuario=codpaciente
+            ).exists():
+                raise serializers.ValidationError(
+                    "El historial clínico especificado no pertenece al paciente."
+                )
+
+        return attrs

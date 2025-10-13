@@ -1,0 +1,17 @@
+{
+  "Comment": "Agregar registro wildcard para subdominios multi-tenant",
+  "Changes": [
+    {
+      "Action": "UPSERT",
+      "ResourceRecordSet": {
+        "Name": "*.notificct.dpdns.org",
+        "Type": "A",
+        "AliasTarget": {
+          "HostedZoneId": "Z3AADJGX6KTTL2",
+          "DNSName": "dualstack.balancearin-1841542738.us-east-2.elb.amazonaws.com.",
+          "EvaluateTargetHealth": true
+        }
+      }
+    }
+  ]
+}
