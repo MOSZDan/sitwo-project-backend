@@ -8,6 +8,7 @@
 from django.db import models
 from django.contrib.auth.models import AbstractBaseUser, BaseUserManager, PermissionsMixin
 
+from django.utils import timezone
 
 # +++ NUEVO MODELO EMPRESA +++
 class Empresa(models.Model):
@@ -427,3 +428,21 @@ class Bitacora(models.Model):
     def __str__(self):
         usuario_nombre = self.usuario.nombre if self.usuario else "Sistema"
         return f"{usuario_nombre} - {self.accion} - {self.tabla_afectada} - {self.timestamp}"
+
+
+class BloqueoUsuario(models.Model):
+    usuario = models.ForeignKey("api.Usuario", on_delete=models.CASCADE, related_name="bloqueos")
+    fecha_inicio = models.DateTimeField(default=timezone.now)
+    fecha_fin = models.DateTimeField(null=True, blank=True)
+    motivo = models.CharField(max_length=255, blank=True, default="")
+    activo = models.BooleanField(default=True)
+    creado_por = models.ForeignKey("auth.User", on_delete=models.SET_NULL, null=True, blank=True)
+
+    class Meta:
+        ordering = ["-fecha_inicio"]
+
+    def esta_vigente(self):
+        return self.activo and (self.fecha_fin is None or self.fecha_fin > timezone.now())
+
+    def __str__(self):
+        return f"Bloqueo {self.usuario} desde {self.fecha_inicio} hasta {self.fecha_fin or 'indefinido'}"
