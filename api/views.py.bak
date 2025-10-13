@@ -599,6 +599,57 @@ class HistorialclinicoViewSet(mixins.CreateModelMixin,
 
         return qs.order_by('-fecha', '-episodio')
 
+    @action(detail=False, methods=['get'])
+    def consentimientos(self, request):
+        """
+        Obtiene el historial de consentimientos del paciente.
+        
+        Query params:
+        - paciente: ID del paciente (requerido)
+        - desde: Fecha inicial (opcional, formato YYYY-MM-DD)
+        - hasta: Fecha final (opcional, formato YYYY-MM-DD)
+        """
+        from .models_consent import Consentimiento
+        from django.utils.dateparse import parse_date
+        
+        # Validar paciente
+        pid = request.query_params.get('paciente')
+        if not pid:
+            return Response(
+                {"error": "Se requiere el parámetro 'paciente'"},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+            
+        # Construir filtro base
+        filters = {'paciente_id': pid}
+        
+        # Agregar filtros de fecha si se proporcionan
+        desde = request.query_params.get('desde')
+        hasta = request.query_params.get('hasta')
+        
+        if desde:
+            fecha_desde = parse_date(desde)
+            if fecha_desde:
+                filters['fecha_firma__date__gte'] = fecha_desde
+                
+        if hasta:
+            fecha_hasta = parse_date(hasta)
+            if fecha_hasta:
+                filters['fecha_firma__date__lte'] = fecha_hasta
+                
+        # Filtrar por tenant si está disponible
+        if hasattr(request, 'tenant') and request.tenant:
+            filters['empresa'] = request.tenant
+            
+        # Obtener consentimientos
+        consentimientos = Consentimiento.objects.filter(**filters).order_by('-fecha_firma')
+        
+        # Serializar resultados
+        from .serializers_consent import ConsentimientoSerializer
+        serializer = ConsentimientoSerializer(consentimientos, many=True)
+        
+        return Response(serializer.data)
+
     def perform_create(self, serializer):
         """Asigna automáticamente la empresa del tenant al crear historia clínica"""
         if hasattr(self.request, 'tenant') and self.request.tenant:
@@ -607,8 +658,6 @@ class HistorialclinicoViewSet(mixins.CreateModelMixin,
             serializer.save()
 
 # -------------------- Consentimiento Digital --------------------
-from .utils_consentimiento import sellar_documento_consentimiento
-
 class ConsentimientoViewSet(ModelViewSet):
     """
     API para gestionar los Consentimientos Digitales.
@@ -625,7 +674,6 @@ class ConsentimientoViewSet(ModelViewSet):
     def perform_create(self, serializer):
         """
         Asegura que el tenant esté configurado antes de crear el consentimiento
-        y procesa automáticamente el sellado digital
         """
         if not hasattr(self.request, 'tenant') or not self.request.tenant:
             raise serializers.ValidationError({
@@ -634,16 +682,7 @@ class ConsentimientoViewSet(ModelViewSet):
             })
         
         print(f"[ConsentimientoViewSet] Creating consent with tenant: {self.request.tenant}")
-        
-        # Guardar el consentimiento inicialmente
-        consentimiento = serializer.save(empresa=self.request.tenant)
-        
-        # Procesar el sellado digital automáticamente
-        try:
-            sellar_documento_consentimiento(consentimiento)
-        except Exception as e:
-            print(f"[ConsentimientoViewSet] Error al sellar documento: {e}")
-            # Aún si hay error en el sellado, el consentimiento se guarda
+        serializer.save()
 
     def get_queryset(self):
         """
@@ -676,114 +715,6 @@ class ConsentimientoViewSet(ModelViewSet):
         Esto es crucial para que el serializador pueda acceder al tenant y a la IP.
         """
         return {'request': self.request}
-
-    @action(detail=True, methods=['get'], url_path='pdf')
-    def descargar_pdf(self, request, pk=None):
-        """
-        Descarga el PDF firmado del consentimiento
-        """
-        # Obtenemos el objeto y lo actualizamos desde la base de datos para tener los campos de sellado actualizados
-        from django.db import models
-        consentimiento = self.get_queryset().get(pk=pk)
-        
-        # Si ya tenemos un PDF almacenado, lo devolvemos directamente
-        if consentimiento.pdf_firmado and len(consentimiento.pdf_firmado) > 0:
-            response = HttpResponse(
-                consentimiento.pdf_firmado,
-                content_type='application/pdf'
-            )
-            response['Content-Disposition'] = f'attachment; filename="consentimiento_{pk}.pdf"'
-            return response
-        
-        # Si no hay PDF almacenado, generamos uno nuevo
-        # pero primero verificamos que tengamos los datos necesarios
-        if not consentimiento.firma_base64:
-            return Response(
-                {"detail": "No se encontró la firma para este consentimiento"},
-                status=status.HTTP_404_NOT_FOUND
-            )
-        
-        try:
-            # Generar el PDF con la información actual - el objeto ya tiene los campos actualizados
-            from ..utils_consentimiento import generar_pdf_consentimiento, calcular_hash_documento
-            pdf_generado = generar_pdf_consentimiento(consentimiento)
-            
-            # Actualizar el registro con el PDF generado
-            consentimiento.pdf_firmado = pdf_generado
-            if not consentimiento.hash_documento:
-                consentimiento.hash_documento = calcular_hash_documento(pdf_generado)
-            if not consentimiento.fecha_hora_sello:
-                from datetime import datetime
-                consentimiento.fecha_hora_sello = datetime.now()
-            consentimiento.save(update_fields=['pdf_firmado', 'hash_documento', 'fecha_hora_sello'])
-            
-            response = HttpResponse(
-                pdf_generado,
-                content_type='application/pdf'
-            )
-            response['Content-Disposition'] = f'attachment; filename="consentimiento_{pk}.pdf"'
-            return response
-        except Exception as e:
-            print(f"Error al generar o devolver PDF: {e}")
-            import traceback
-            print(traceback.format_exc())  # Esto nos ayudará a ver el error exacto
-            return Response(
-                {"detail": f"Error al generar el PDF del consentimiento: {str(e)}"},
-                status=status.HTTP_500_INTERNAL_SERVER_ERROR
-            )
-
-    @action(detail=True, methods=['get'], url_path='validar')
-    def validar_consentimiento(self, request, pk=None):
-        """
-        Valida que el consentimiento no haya sido alterado
-        """
-        consentimiento = self.get_object()
-        
-        if not consentimiento.pdf_firmado or not consentimiento.hash_documento:
-            return Response(
-                {"detail": "No se puede validar este consentimiento"},
-                status=status.HTTP_400_BAD_REQUEST
-            )
-        
-        # Recalcular el hash del PDF almacenado
-        hash_actual = calcular_hash_documento(bytes(consentimiento.pdf_firmado))
-        
-        # Comparar con el hash almacenado
-        es_valido = hash_actual == consentimiento.hash_documento
-        
-        return Response({
-            "valido": es_valido,
-            "hash_almacenado": consentimiento.hash_documento,
-            "hash_actual": hash_actual,
-            "fecha_sello": consentimiento.fecha_hora_sello,
-            "validado_por": f"{consentimiento.validado_por.nombre} {consentimiento.validado_por.apellido}" if consentimiento.validado_por else None,
-            "fecha_validacion": consentimiento.fecha_validacion
-        })
-
-    @action(detail=True, methods=['post'], url_path='firmar-validar')
-    def firmar_y_validar(self, request, pk=None):
-        """
-        Permite a un usuario autorizado validar un consentimiento
-        """
-        consentimiento = self.get_object()
-        
-        # Verificar que el usuario tenga permisos para validar
-        if not hasattr(request.user, 'usuario') or request.user.usuario.idtipousuario.rol not in ['Administrador', 'Odontólogo']:
-            return Response(
-                {"detail": "No tienes permisos para validar consentimientos"},
-                status=status.HTTP_403_FORBIDDEN
-            )
-        
-        # Actualizar los datos de validación
-        consentimiento.validado_por = request.user.usuario
-        consentimiento.fecha_validacion = datetime.now()
-        consentimiento.save()
-        
-        return Response({
-            "detail": "Consentimiento validado exitosamente",
-            "validado_por": f"{consentimiento.validado_por.nombre} {consentimiento.validado_por.apellido}",
-            "fecha_validacion": consentimiento.fecha_validacion
-        })
 
 # -------------------- Bitácora de Auditoría --------------------
 

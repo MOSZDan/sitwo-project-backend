@@ -395,6 +395,7 @@ class HistorialclinicoCreateSerializer(serializers.ModelSerializer):
 class HistorialclinicoListSerializer(serializers.ModelSerializer):
     paciente_nombre = serializers.CharField(source='pacientecodigo.codusuario.nombre', read_only=True)
     paciente_apellido = serializers.CharField(source='pacientecodigo.codusuario.apellido', read_only=True)
+    consentimientos = serializers.SerializerMethodField()
 
     class Meta:
         model = Historialclinico
@@ -402,8 +403,29 @@ class HistorialclinicoListSerializer(serializers.ModelSerializer):
             'id', 'pacientecodigo', 'paciente_nombre', 'paciente_apellido',
             'episodio', 'fecha',
             'alergias', 'enfermedades', 'motivoconsulta', 'diagnostico',
-            'updated_at',
+            'updated_at', 'consentimientos'
         ]
+    
+    def get_consentimientos(self, obj):
+        """Obtiene los consentimientos asociados a este episodio del historial"""
+        from .models_consent import Consentimiento
+        # Buscamos consentimientos del mismo día del episodio
+        consentimientos = Consentimiento.objects.filter(
+            paciente=obj.pacientecodigo,
+            fecha_firma__date=obj.fecha.date()
+        ).order_by('-fecha_firma')
+        
+        # Usamos ConsentimientoSerializer pero con campos específicos para el historial
+        return [{
+            'id': c.id,
+            'titulo': c.titulo,
+            'firmado': c.firmado,
+            'fecha_firma': c.fecha_firma,
+            'validado': c.validado,
+            'validado_por': c.validado_por.codusuario.nombre if c.validado_por else None,
+            'fecha_validacion': c.fecha_validacion,
+            'hash_documento': c.hash_documento
+        } for c in consentimientos]
 
 # =========================
 #   NUEVO: Consentimiento Digital
@@ -417,15 +439,6 @@ class ConsentimientoSerializer(serializers.ModelSerializer):
     paciente_nombre = serializers.CharField(source='paciente.codusuario.nombre', read_only=True)
     paciente_apellido = serializers.CharField(source='paciente.codusuario.apellido', read_only=True)
     fecha_creacion_formateada = serializers.DateTimeField(source='fecha_creacion', format="%d/%m/%Y %H:%M", read_only=True)
-    
-    # Campos de sellado digital (solo lectura)
-    fecha_hora_sello = serializers.DateTimeField(read_only=True)
-    hash_documento = serializers.CharField(read_only=True)
-    fecha_validacion = serializers.DateTimeField(read_only=True)
-    
-    # Campo para mostrar quién validó el consentimiento
-    validado_por_nombre = serializers.CharField(source='validado_por.nombre', read_only=True)
-    validado_por_apellido = serializers.CharField(source='validado_por.apellido', read_only=True)
 
     class Meta:
         model = Consentimiento
@@ -444,23 +457,13 @@ class ConsentimientoSerializer(serializers.ModelSerializer):
             'fecha_creacion_formateada',
             'ip_creacion',
             'empresa',
-            # Campos de sellado digital
-            'fecha_hora_sello',
-            'hash_documento',
-            'fecha_validacion',
-            'validado_por_nombre',
-            'validado_por_apellido',
         )
         # Campos que no se deben requerir en la entrada (POST/PUT)
         read_only_fields = (
+            'id',
             'fecha_creacion',
             'ip_creacion',
             'empresa',
-            'fecha_hora_sello',
-            'hash_documento',
-            'fecha_validacion',
-            'validado_por',
-            'id',
             'paciente_nombre',
             'paciente_apellido',
             'fecha_creacion_formateada',

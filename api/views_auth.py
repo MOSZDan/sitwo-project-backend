@@ -110,7 +110,7 @@ def auth_register(request):
                 existing_user = User.objects.get(username=email)
                 return Response(
                     {"detail": "Ya existe un usuario con este email"},
-                    status=status.HTTP_400_BAD_REQUEST
+                    status=status.HTTP_409_CONFLICT
                 )
             except User.DoesNotExist:
                 pass  # Correcto, el usuario no existe

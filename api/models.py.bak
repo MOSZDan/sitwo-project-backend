@@ -415,12 +415,12 @@ class Consentimiento(models.Model):
     firma_base64 = models.TextField(help_text="Firma del paciente guardada en formato Base64")
     fecha_creacion = models.DateTimeField(auto_now_add=True)
     ip_creacion = models.GenericIPAddressField()
-
+    
     # Datos del documento sellado
     pdf_firmado = models.BinaryField(help_text="PDF del consentimiento con firma digital", null=True)
     hash_documento = models.CharField(max_length=64, help_text="Hash SHA-256 del documento firmado", null=True)
     fecha_hora_sello = models.DateTimeField(help_text="Fecha y hora del sellado digital", null=True)
-    
+
     # Datos de validación
     validado_por = models.ForeignKey(
         Usuario,
@@ -429,13 +429,17 @@ class Consentimiento(models.Model):
         related_name='consentimientos_validados',
         help_text="Usuario que validó el consentimiento"
     )
-    fecha_validacion = models.DateTimeField(help_text="Fecha y hora de validación", null=True)
+    fecha_validacion = models.DateTimeField(null=True, help_text="Fecha y hora de validación")
 
     class Meta:
         db_table = 'api_consentimiento'
         verbose_name = 'Consentimiento'
         verbose_name_plural = 'Consentimientos'
         ordering = ['-fecha_creacion']
+        permissions = [
+            ("can_emit_consent", "Puede emitir consentimientos"),
+            ("can_validate_consent", "Puede validar consentimientos"),
+        ]
 
     def __str__(self):
         return f"Consentimiento de {self.paciente} ({self.fecha_creacion.strftime('%Y-%m-%d')})"
