@@ -120,6 +120,7 @@ INSTALLED_APPS = [
     "rest_framework.authtoken",
     "api",
     "whitenoise.runserver_nostatic",
+    "no_show_policies",
 ]
 
 # ------------------------------------
