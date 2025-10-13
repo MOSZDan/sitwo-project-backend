@@ -1,4 +1,3 @@
-# api/views_auth.py
 from typing import Optional
 
 from django.views.decorators.csrf import ensure_csrf_cookie
@@ -10,6 +9,8 @@ from django.core.mail import EmailMultiAlternatives
 from django.core.exceptions import ObjectDoesNotExist, MultipleObjectsReturned
 from django.conf import settings
 from django.db import transaction, IntegrityError, DatabaseError, connection
+from django.utils import timezone
+from django.db.models import Q
 
 from rest_framework import status
 from rest_framework.decorators import (
@@ -22,13 +23,20 @@ from rest_framework.response import Response
 from rest_framework.authtoken.models import Token
 from rest_framework.views import APIView
 
-from .models import Usuario, Paciente, Odontologo, Recepcionista, Bitacora
+from .models import (
+    Usuario,
+    Paciente,
+    Odontologo,
+    Recepcionista,
+    Bitacora,
+    BloqueoUsuario,  # Import del modelo de bloqueo
+)
 from .serializers import (
     UserNotificationSettingsSerializer,
     UsuarioMeSerializer,
+    NotificationPreferencesSerializer,
 )
 from .serializers_auth import RegisterSerializer
-from .serializers import NotificationPreferencesSerializer
 
 User = get_user_model()
 
@@ -55,6 +63,41 @@ def close_db_connection():
         pass
 
 
+def _resolve_tipodeusuario(idtipousuario: Optional[int]) -> int:
+    """Compatibilidad legacy si llegara vacío (default paciente=2)."""
+    return idtipousuario if idtipousuario else 2
+
+
+def _esta_bloqueado_usuario_por_email(email: str, tenant=None) -> tuple[bool, Optional[str]]:
+    """
+    Retorna (True, mensaje) si el usuario (api.Usuario) tiene un bloqueo vigente en BloqueoUsuario:
+      - activo=True
+      - fecha_fin nula (bloqueo indefinido) o mayor a ahora.
+    Si 'tenant' viene, valida contra ese tenant.
+    """
+    if not email:
+        return False, None
+
+    q = Usuario.objects.filter(correoelectronico__iexact=email)
+    if tenant is not None:
+        q = q.filter(empresa=tenant)
+    usuario = q.first()
+    if not usuario:
+        return False, None
+
+    ahora = timezone.now()
+    bloqueo = (
+        BloqueoUsuario.objects.filter(usuario=usuario, activo=True)
+        .filter(Q(fecha_fin__isnull=True) | Q(fecha_fin__gt=ahora))
+        .order_by("-fecha_inicio")
+        .first()
+    )
+    if bloqueo:
+        msg = bloqueo.motivo or (f"Usuario bloqueado hasta {bloqueo.fecha_fin}." if bloqueo.fecha_fin else "Usuario bloqueado.")
+        return True, msg
+    return False, None
+
+
 # ============================
 # CSRF
 # ============================
@@ -65,11 +108,6 @@ def close_db_connection():
 def csrf_token(request):
     """Siembra cookie CSRF (csrftoken). Útil si luego usas endpoints con sesión/CSRF."""
     return Response({"detail": "CSRF cookie set"}, status=status.HTTP_200_OK)
-
-
-def _resolve_tipodeusuario(idtipousuario: Optional[int]) -> int:
-    """Compatibilidad legacy si llegara vacío (default paciente=2)."""
-    return idtipousuario if idtipousuario else 2
 
 
 # ============================
@@ -108,7 +146,7 @@ def auth_register(request):
         with transaction.atomic():
             # 1) auth_user: email único
             try:
-                existing_user = User.objects.get(username=email)
+                _ = User.objects.get(username=email)
                 return Response(
                     {"detail": "Ya existe un usuario con este email"},
                     status=status.HTTP_409_CONFLICT
@@ -197,6 +235,9 @@ def auth_login(request):
     """
     Login de usuario con manejo robusto de problemas de conexión PostgreSQL
     Devuelve información del usuario y token de autenticación
+
+    Nota: Si existe un BloqueoUsuario ACTIVO y vigente (del tenant actual, si aplica),
+    se responde 403 y no se emite token.
     """
     try:
         email = (request.data.get("email") or "").strip().lower()
@@ -207,7 +248,7 @@ def auth_login(request):
         # Cerrar cualquier conexión previa
         close_db_connection()
 
-        # Autenticación simple - sin reintentos excesivos
+        # Autenticación básica contra auth_user
         user = authenticate(username=email, password=password)
 
         if not user:
@@ -215,27 +256,28 @@ def auth_login(request):
         if not user.is_active:
             return Response({"detail": "Cuenta desactivada"}, status=status.HTTP_401_UNAUTHORIZED)
 
-        # Obtener o crear token
+        # Tenant detectado (si tu middleware lo aporta)
+        tenant = getattr(request, 'tenant', None)
+
+        # Resolver el perfil de dominio y validar pertenencia al tenant ANTES de emitir token
+        usuario_query = Usuario.objects.filter(correoelectronico=email)
+        if tenant:
+            usuario_query = usuario_query.filter(empresa=tenant)
+        usuario = usuario_query.first()
+
+        if not usuario:
+            return Response(
+                {"detail": "Credenciales inválidas o usuario no pertenece a esta empresa"},
+                status=status.HTTP_401_UNAUTHORIZED
+            )
+
+        # BLOQUEO: verifica si existe un BloqueoUsuario vigente (activo y sin fecha_fin o con fecha_fin futura)
+        bloqueado, mensaje = _esta_bloqueado_usuario_por_email(email=email, tenant=tenant)
+        if bloqueado:
+            return Response({"detail": mensaje or "Tu cuenta está bloqueada."}, status=status.HTTP_403_FORBIDDEN)
+
+        # Obtener o crear token (recién aquí, tras pasar validaciones)
         token, _ = Token.objects.get_or_create(user=user)
-
-        # Obtener información del usuario y validar tenant
-        try:
-            usuario_query = Usuario.objects.filter(correoelectronico=email)
-
-            # Filtrar por tenant si está disponible (multi-tenancy)
-            tenant = getattr(request, 'tenant', None)
-            if tenant:
-                usuario_query = usuario_query.filter(empresa=tenant)
-
-            usuario = usuario_query.first()
-
-            if not usuario:
-                return Response(
-                    {"detail": "Credenciales inválidas o usuario no pertenece a esta empresa"},
-                    status=status.HTTP_401_UNAUTHORIZED
-                )
-        except Exception as e:
-            return Response({"detail": "Error al obtener información del usuario"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
         # Log de login (tolerante a fallos: jamás rompe el login)
         try:
@@ -635,4 +677,3 @@ def notification_preferences(request):
         return Response({"detail": f"Error: {str(e)}"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
     finally:
         close_db_connection()
-

@@ -7,6 +7,7 @@ from .models import (
     Historialclinico,  # ← NUEVO: HCE
     Consentimiento, # <-- NUEVO: Consentimiento
 )
+from .models import Estadodeconsulta
 from rest_framework.validators import UniqueTogetherValidator
 
 # --------- Usuarios / Pacientes ---------
@@ -87,6 +88,7 @@ class CreateConsultaSerializer(serializers.ModelSerializer):
             "codrecepcionista",
         )
 
+
     def validate(self, data):
         """
         Validar que no exista ya una consulta para el mismo odontólogo,
@@ -106,6 +108,11 @@ class CreateConsultaSerializer(serializers.ModelSerializer):
 
 
 # --- NUEVO: Serializador para Reprogramar Cita ---
+class EstadodeconsultaSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Estadodeconsulta
+        fields = "__all__"
+
 class ReprogramarConsultaSerializer(serializers.Serializer):
     """
     Serializador para validar los datos al reprogramar una cita.

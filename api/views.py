@@ -1,4 +1,3 @@
-# api/views.py
 from django.http import JsonResponse, HttpResponse
 from django.contrib.auth import get_user_model
 from django.db import connection
@@ -8,6 +7,7 @@ from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_http_methods
 from django.db.models import Q
 from django.utils.timezone import make_aware
+from django.utils import timezone  # <-- necesario (usado en reprogramar)
 from datetime import datetime, timedelta
 import csv
 from io import BytesIO
@@ -24,8 +24,8 @@ from rest_framework.viewsets import GenericViewSet
 from django_filters.rest_framework import DjangoFilterBackend
 
 from .models import (
-    Paciente, Consulta, Odontologo, Horario, Tipodeconsulta,
-    Usuario, Tipodeusuario, Bitacora, Historialclinico, Consentimiento # Quitado Vista
+    Paciente, Consulta, Odontologo, Horario, Tipodeconsulta, Estadodeconsulta,  # <-- añadido Estadodeconsulta
+    Usuario, Tipodeusuario, Bitacora, Historialclinico, Consentimiento
 )
 
 from .serializers import (
@@ -42,8 +42,11 @@ from .serializers import (
     ReprogramarConsultaSerializer,
     HistorialclinicoCreateSerializer,
     HistorialclinicoListSerializer,
-    ConsentimientoSerializer
+    ConsentimientoSerializer,
+    EstadodeconsultaSerializer,  # <-- añadido
 )
+
+
 # -------------------- Health / Utils --------------------
 
 def health(request):
@@ -144,6 +147,7 @@ def _tenant(request):
     """Obtiene el tenant desde el middleware (request.tenant o None)."""
     return getattr(request, "tenant", None)
 
+
 def _es_admin_por_tabla(request) -> bool:
     """
     ¿El usuario autenticado es rol 'Administrador' EN SU EMPRESA?
@@ -170,14 +174,6 @@ def _es_admin_por_tabla(request) -> bool:
 
 # -------------------- Pacientes --------------------
 
-#class PacienteViewSet(ReadOnlyModelViewSet):
-    """
-    API read-only de Pacientes.
-    Requiere sesión activa (IsAuthenticated) y trae el Usuario relacionado.
-    """
-    permission_classes = [IsAuthenticated]
-    queryset = Paciente.objects.select_related("codusuario").all()
-    serializer_class = PacienteSerializer
 class PacienteViewSet(ReadOnlyModelViewSet):
     """
     API read-only de Pacientes.
@@ -199,6 +195,7 @@ class PacienteViewSet(ReadOnlyModelViewSet):
             queryset = queryset.filter(empresa=self.request.tenant)
 
         return queryset
+
 
 # -------------------- Consultas (Citas) --------------------
 
@@ -340,7 +337,8 @@ Si necesitas cancelar o reprogramar tu cita, ponte en contacto con nosotros.
                         mensaje=body,
                         datos_adicionales={
                             "consulta_id": consulta.id,
-                            "empresa_id": getattr(consulta, "empresa_id", None) or getattr(consulta.empresa, "id", None),
+                            "empresa_id": getattr(consulta, "empresa_id", None) or getattr(consulta.empresa, "id",
+                                                                                           None),
                             "reminder": label,
                         },
                         estado="PENDIENTE",
@@ -374,7 +372,6 @@ Si necesitas cancelar o reprogramar tu cita, ponte en contacto con nosotros.
         # Devolver la consulta completa actualizada con todas sus relaciones
         consulta_serializer = ConsultaSerializer(consulta)
         return Response(consulta_serializer.data, status=status.HTTP_200_OK)
-
 
     # --- NUEVA ACCIÓN: Cancelar Cita (eliminar definitivamente) ---
     @action(detail=True, methods=['post'], url_path='cancelar')
@@ -492,6 +489,7 @@ Si necesitas cancelar o reprogramar tu cita, ponte en contacto con nosotros.
             status=status.HTTP_200_OK
         )
 
+
 # -------------------- Catálogos --------------------
 
 class OdontologoViewSet(ReadOnlyModelViewSet):
@@ -538,7 +536,8 @@ class HorarioViewSet(ReadOnlyModelViewSet):
 
         # Validar que existan los parámetros
         if not fecha or not odontologo_id:
-            logger.warning(f"[Horarios Disponibles] Parámetros faltantes - fecha: {fecha}, odontologo_id: {odontologo_id}")
+            logger.warning(
+                f"[Horarios Disponibles] Parámetros faltantes - fecha: {fecha}, odontologo_id: {odontologo_id}")
             return Response(
                 {"detail": "Se requieren los parámetros 'fecha' y 'odontologo_id'."},
                 status=status.HTTP_400_BAD_REQUEST
@@ -641,6 +640,21 @@ class TipodeconsultaViewSet(ReadOnlyModelViewSet):
         return queryset
 
 
+class EstadodeconsultaViewSet(ReadOnlyModelViewSet):
+    """
+    Catálogo de estados de consulta (ej: Agendada, Confirmada, Atendida, Cancelada).
+    """
+    permission_classes = [IsAuthenticated]
+    serializer_class = EstadodeconsultaSerializer
+    pagination_class = None
+
+    def get_queryset(self):
+        qs = Estadodeconsulta.objects.all()
+        if hasattr(self.request, 'tenant') and self.request.tenant:
+            qs = qs.filter(empresa=self.request.tenant)
+        return qs.order_by('estado')
+
+
 # -------------------- ADMIN: Roles y Usuarios --------------------
 
 class TipodeusuarioViewSet(ReadOnlyModelViewSet):
@@ -654,6 +668,7 @@ class TipodeusuarioViewSet(ReadOnlyModelViewSet):
         if t:
             qs = qs.filter(Q(empresa=t) | Q(empresa__isnull=True))
         return qs
+
 
 class UsuarioViewSet(ModelViewSet):
     permission_classes = [IsAuthenticated]
@@ -695,8 +710,10 @@ class UsuarioViewSet(ModelViewSet):
         data = UsuarioAdminSerializer(qs, many=True).data
         return Response(data)
 
+
 def ping(_):
     return JsonResponse({"ok": True})
+
 
 # -------------------- Perfil de Usuario --------------------
 
@@ -705,8 +722,7 @@ class UserProfileView(RetrieveUpdateAPIView):
     Vista para leer y actualizar los datos del perfil del usuario autenticado.
     Soporta GET, PUT y PATCH.
     """
-    # Necesitarías agregar UsuarioMeSerializer en serializers.py
-    # serializer_class = UsuarioMeSerializer
+    # serializer_class = UsuarioMeSerializer  # si deseas devolver/actualizar el perfil
     permission_classes = [IsAuthenticated]
 
     def get_object(self):
@@ -719,6 +735,7 @@ class UserProfileView(RetrieveUpdateAPIView):
             return usuario_perfil
         except Usuario.DoesNotExist:
             return None
+
 
 # -------------------- Historias Clínicas (HCE) --------------------
 
@@ -761,8 +778,11 @@ class HistorialclinicoViewSet(mixins.CreateModelMixin,
         else:
             serializer.save()
 
+
 # -------------------- Consentimiento Digital --------------------
-from .utils_consentimiento import sellar_documento_consentimiento
+from .utils_consentimiento import sellar_documento_consentimiento, calcular_hash_documento, \
+    generar_pdf_consentimiento  # <-- centraliza imports
+
 
 class ConsentimientoViewSet(ModelViewSet):
     """
@@ -787,12 +807,12 @@ class ConsentimientoViewSet(ModelViewSet):
                 "error": "No se pudo determinar el tenant",
                 "detail": "Se requiere un tenant válido para crear consentimientos"
             })
-        
+
         print(f"[ConsentimientoViewSet] Creating consent with tenant: {self.request.tenant}")
-        
+
         # Guardar el consentimiento inicialmente
         consentimiento = serializer.save(empresa=self.request.tenant)
-        
+
         # Procesar el sellado digital automáticamente
         try:
             sellar_documento_consentimiento(consentimiento)
@@ -805,24 +825,13 @@ class ConsentimientoViewSet(ModelViewSet):
         Filtra los consentimientos para que solo se muestren los que pertenecen
         a la empresa (tenant) actual.
         """
-        # Iniciar con el queryset base y optimizar consulta
         queryset = Consentimiento.objects.select_related('paciente__codusuario', 'empresa')
-        
-        # Aplicar filtro por tenant
-        if hasattr(self.request, 'tenant'):
-            queryset = queryset.filter(empresa=self.request.tenant)
-        else:
-            queryset = queryset.none()  # Si no hay tenant, no mostrar nada
-            
-        return queryset
 
-        # Filtrar por el tenant detectado en el request
         if hasattr(self.request, 'tenant') and self.request.tenant:
             queryset = queryset.filter(empresa=self.request.tenant)
         else:
-            # Si no hay tenant, no se devuelve nada por seguridad
-            return Consentimiento.objects.none()
-            
+            queryset = queryset.none()
+
         return queryset.order_by('-fecha_creacion')
 
     def get_serializer_context(self):
@@ -837,10 +846,8 @@ class ConsentimientoViewSet(ModelViewSet):
         """
         Descarga el PDF firmado del consentimiento
         """
-        # Obtenemos el objeto y lo actualizamos desde la base de datos para tener los campos de sellado actualizados
-        from django.db import models
         consentimiento = self.get_queryset().get(pk=pk)
-        
+
         # Si ya tenemos un PDF almacenado, lo devolvemos directamente
         if consentimiento.pdf_firmado and len(consentimiento.pdf_firmado) > 0:
             response = HttpResponse(
@@ -849,29 +856,26 @@ class ConsentimientoViewSet(ModelViewSet):
             )
             response['Content-Disposition'] = f'attachment; filename="consentimiento_{pk}.pdf"'
             return response
-        
+
         # Si no hay PDF almacenado, generamos uno nuevo
-        # pero primero verificamos que tengamos los datos necesarios
         if not consentimiento.firma_base64:
             return Response(
                 {"detail": "No se encontró la firma para este consentimiento"},
                 status=status.HTTP_404_NOT_FOUND
             )
-        
+
         try:
-            # Generar el PDF con la información actual - el objeto ya tiene los campos actualizados
-            from ..utils_consentimiento import generar_pdf_consentimiento, calcular_hash_documento
+            # Generar el PDF con la información actual
             pdf_generado = generar_pdf_consentimiento(consentimiento)
-            
+
             # Actualizar el registro con el PDF generado
             consentimiento.pdf_firmado = pdf_generado
             if not consentimiento.hash_documento:
                 consentimiento.hash_documento = calcular_hash_documento(pdf_generado)
             if not consentimiento.fecha_hora_sello:
-                from datetime import datetime
                 consentimiento.fecha_hora_sello = datetime.now()
             consentimiento.save(update_fields=['pdf_firmado', 'hash_documento', 'fecha_hora_sello'])
-            
+
             response = HttpResponse(
                 pdf_generado,
                 content_type='application/pdf'
@@ -881,7 +885,7 @@ class ConsentimientoViewSet(ModelViewSet):
         except Exception as e:
             print(f"Error al generar o devolver PDF: {e}")
             import traceback
-            print(traceback.format_exc())  # Esto nos ayudará a ver el error exacto
+            print(traceback.format_exc())
             return Response(
                 {"detail": f"Error al generar el PDF del consentimiento: {str(e)}"},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
@@ -893,19 +897,19 @@ class ConsentimientoViewSet(ModelViewSet):
         Valida que el consentimiento no haya sido alterado
         """
         consentimiento = self.get_object()
-        
+
         if not consentimiento.pdf_firmado or not consentimiento.hash_documento:
             return Response(
                 {"detail": "No se puede validar este consentimiento"},
                 status=status.HTTP_400_BAD_REQUEST
             )
-        
+
         # Recalcular el hash del PDF almacenado
         hash_actual = calcular_hash_documento(bytes(consentimiento.pdf_firmado))
-        
+
         # Comparar con el hash almacenado
         es_valido = hash_actual == consentimiento.hash_documento
-        
+
         return Response({
             "valido": es_valido,
             "hash_almacenado": consentimiento.hash_documento,
@@ -921,28 +925,28 @@ class ConsentimientoViewSet(ModelViewSet):
         Permite a un usuario autorizado validar un consentimiento
         """
         consentimiento = self.get_object()
-        
+
         # Verificar que el usuario tenga permisos para validar
-        if not hasattr(request.user, 'usuario') or request.user.usuario.idtipousuario.rol not in ['Administrador', 'Odontólogo']:
+        if not hasattr(request.user, 'usuario') or request.user.usuario.idtipousuario.rol not in ['Administrador',
+                                                                                                  'Odontólogo']:
             return Response(
                 {"detail": "No tienes permisos para validar consentimientos"},
                 status=status.HTTP_403_FORBIDDEN
             )
-        
+
         # Actualizar los datos de validación
         consentimiento.validado_por = request.user.usuario
         consentimiento.fecha_validacion = datetime.now()
         consentimiento.save()
-        
+
         return Response({
             "detail": "Consentimiento validado exitosamente",
             "validado_por": f"{consentimiento.validado_por.nombre} {consentimiento.validado_por.apellido}",
             "fecha_validacion": consentimiento.fecha_validacion
         })
 
-# -------------------- Bitácora de Auditoría --------------------
 
-# Reemplaza solo la clase BitacoraViewSet en tu api/views.py
+# -------------------- Bitácora de Auditoría --------------------
 
 class BitacoraViewSet(ReadOnlyModelViewSet):
     """
@@ -1227,6 +1231,7 @@ import boto3
 from botocore.exceptions import ClientError
 import os
 
+
 class DocumentoClinicoViewSet(ModelViewSet):
     """
     ViewSet para gestionar documentos clínicos almacenados en S3.
@@ -1503,8 +1508,8 @@ class DocumentoClinicoViewSet(ModelViewSet):
             if consulta_id:
                 # Validar que pertenezca al mismo paciente
                 if not Consulta.objects.filter(
-                    id=consulta_id,
-                    codpaciente=documento.codpaciente
+                        id=consulta_id,
+                        codpaciente=documento.codpaciente
                 ).exists():
                     return Response(
                         {'error': 'La consulta no pertenece al paciente del documento'},
@@ -1517,8 +1522,8 @@ class DocumentoClinicoViewSet(ModelViewSet):
             if historial_id:
                 # Validar que pertenezca al mismo paciente
                 if not Historialclinico.objects.filter(
-                    id=historial_id,
-                    pacientecodigo=documento.codpaciente
+                        id=historial_id,
+                        pacientecodigo=documento.codpaciente
                 ).exists():
                     return Response(
                         {'error': 'El historial clínico no pertenece al paciente del documento'},
