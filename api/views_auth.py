@@ -1,5 +1,5 @@
 from typing import Optional
-
+import logging
 from django.views.decorators.csrf import ensure_csrf_cookie
 from django.contrib.auth import get_user_model, authenticate
 from django.contrib.auth.tokens import default_token_generator
@@ -40,7 +40,7 @@ from .serializers_auth import RegisterSerializer
 
 User = get_user_model()
 
-
+logger = logging.getLogger(__name__)
 # ============================
 # Utils
 # ============================
@@ -427,6 +427,7 @@ class UsuarioMeView(APIView):
 
     def get(self, request):
         """GET /api/usuario/me - Obtener datos del usuario"""
+
         try:
             user = request.user
 

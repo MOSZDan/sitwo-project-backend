@@ -1,5 +1,6 @@
 from rest_framework import serializers
 from django.db.models import Q
+import re
 from .models import (
     Usuario, Paciente, Odontologo, Recepcionista,
     Horario, Tipodeconsulta, Estadodeconsulta, Consulta,
@@ -263,89 +264,102 @@ class RecepcionistaProfileSerializer(serializers.ModelSerializer):
         fields = ('habilidadesSoftware',)
 
 
-# --- Serializer Principal para el Perfil del Usuario ---
+
 class UsuarioMeSerializer(serializers.ModelSerializer):
     """
     Gestiona la lectura y actualización del perfil del usuario autenticado.
-    SOLO permite editar: correoelectronico y telefono
+    SOLO permite editar: correoelectronico, telefono y password
     """
-    # Campo dinámico que mostrará el perfil correcto (paciente, odontologo, etc.)
     perfil = serializers.SerializerMethodField()
+    password = serializers.CharField(write_only=True, required=False, allow_blank=True, min_length=6)
+    password_confirm = serializers.CharField(write_only=True, required=False, allow_blank=True)
 
     class Meta:
         model = Usuario
-        # Campos que se mostrarán
         fields = (
             'codigo', 'nombre', 'apellido', 'telefono',
-            'correoelectronico', 'sexo', 'perfil'
+            'correoelectronico', 'sexo', 'idtipousuario', 'recibir_notificaciones',
+            'perfil', 'password', 'password_confirm'
         )
-        # Solo se puede editar: correoelectronico y telefono
-        # Todo lo demás es de solo lectura
-        read_only_fields = ('codigo', 'nombre', 'apellido', 'sexo', 'perfil')
+        read_only_fields = ('codigo', 'nombre', 'apellido', 'sexo', 'idtipousuario', 'recibir_notificaciones', 'perfil')
 
     def get_perfil(self, instance):
-        """
-        Esta función se ejecuta al LEER (GET) los datos.
-        Devuelve un diccionario con los datos del perfil específico del usuario.
-        """
-        # El 'idtipousuario_id' viene de tu modelo Usuario y nos dice el rol.
         role_id = instance.idtipousuario_id
-
-        if role_id == 2 and hasattr(instance, 'paciente'):  # 2 = Paciente
+        if role_id == 2 and hasattr(instance, 'paciente'):
             return PacienteProfileSerializer(instance.paciente).data
-        elif role_id == 4 and hasattr(instance, 'odontologo'):  # 4 = Odontologo
+        elif role_id == 4 and hasattr(instance, 'odontologo'):
             return OdontologoProfileSerializer(instance.odontologo).data
-        elif role_id == 3 and hasattr(instance, 'recepcionista'):  # 3 = Recepcionista
+        elif role_id == 3 and hasattr(instance, 'recepcionista'):
             return RecepcionistaProfileSerializer(instance.recepcionista).data
-
-        return None  # Si no tiene un perfil específico
+        return None
 
     def validate_correoelectronico(self, value):
-        """Validar que el nuevo email no esté en uso por otro usuario"""
         value = value.lower().strip()
-        # Verificar que no esté en uso por otro usuario
         usuario_actual = self.instance
         if Usuario.objects.filter(correoelectronico=value).exclude(codigo=usuario_actual.codigo).exists():
             raise serializers.ValidationError("Este correo electrónico ya está en uso por otro usuario.")
         return value
 
     def validate_telefono(self, value):
-        """Validar formato del teléfono (8 dígitos)"""
-        value = value.strip()
-        if value and not re.match(r'^\d{8}$', value):
-            raise serializers.ValidationError("El teléfono debe tener exactamente 8 dígitos numéricos.")
+        """Valida formato de teléfono (8-15 dígitos, puede incluir +, espacios y guiones)"""
+        value = (value or "").strip()
+        if not value:
+            return value
+        
+        # Remover caracteres permitidos para validar solo números
+        numeros = re.sub(r'[\s\-\+\(\)]', '', value)
+        
+        # Validar que tenga entre 8 y 15 dígitos
+        if not re.match(r'^\d{8,15}$', numeros):
+            raise serializers.ValidationError(
+                "El teléfono debe contener entre 8 y 15 dígitos. "
+                "Puede incluir +, espacios, guiones y paréntesis."
+            )
         return value
+
+    def validate(self, attrs):
+        password = attrs.get('password', '')
+        password_confirm = attrs.get('password_confirm', '')
+        if password or password_confirm:
+            if password != password_confirm:
+                raise serializers.ValidationError({'password_confirm': 'Las contraseñas no coinciden.'})
+            if password and len(password) < 6:
+                raise serializers.ValidationError({'password': 'La contraseña debe tener al menos 6 caracteres.'})
+        return attrs
 
     def update(self, instance, validated_data):
         """
-        Solo actualiza correoelectronico y telefono.
-        También actualiza el Django User si cambia el email.
+        Lógica de actualización corregida y más segura.
         """
-        from django.contrib.auth import get_user_model
-        User = get_user_model()
+        from django.contrib.auth.models import User
 
-        # Email nuevo (si se proporciona)
+        # Obtener el usuario de Django asociado (asumiendo que el username es el email)
+        try:
+            django_user = User.objects.get(username=instance.correoelectronico)
+        except User.DoesNotExist:
+            django_user = None
+
+        # Actualizar contraseña si se proporcionó
+        password = validated_data.get('password')
+        if password and django_user:
+            django_user.set_password(password)
+
+        # Actualizar correo electrónico si cambió
         nuevo_email = validated_data.get('correoelectronico')
         if nuevo_email and nuevo_email != instance.correoelectronico:
-            # Actualizar en Usuario (tabla api)
             instance.correoelectronico = nuevo_email
-
-            # Actualizar también en Django User (auth_user)
-            try:
-                django_user = User.objects.get(username=instance.correoelectronico)
+            if django_user:
                 django_user.username = nuevo_email
                 django_user.email = nuevo_email
-                django_user.save()
-            except User.DoesNotExist:
-                # Si no existe el usuario Django, no hacer nada
-                pass
 
-        # Teléfono (si se proporciona)
-        nuevo_telefono = validated_data.get('telefono')
-        if nuevo_telefono is not None:
-            instance.telefono = nuevo_telefono
+        # Actualizar teléfono
+        instance.telefono = validated_data.get('telefono', instance.telefono)
 
+        # Guardar los cambios
         instance.save()
+        if django_user:
+            django_user.save()
+
         return instance
 
 #para notificaciones

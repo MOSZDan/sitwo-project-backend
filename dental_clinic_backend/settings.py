@@ -80,6 +80,8 @@ else:
         "https://este.notificct.dpdns.org",
         # Vercel frontend
         "https://buy-dental-smile.vercel.app",
+        "https://norte.localhost:5173",
+        "http://localhost:5173",
     ]
 
 CORS_ALLOW_CREDENTIALS = True
@@ -136,7 +138,7 @@ MIDDLEWARE = [
     "django.contrib.auth.middleware.AuthenticationMiddleware",
     "django.contrib.messages.middleware.MessageMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
-    "api.middleware.TenantMiddleware",  # Multi-tenancy: identificar empresa
+    "api.middleware_tenant.TenantMiddleware",  # Multi-tenancy: identificar empresa
     "api.middleware.AuditMiddleware",  # Auditoría (después de TenantMiddleware)
 
 ]

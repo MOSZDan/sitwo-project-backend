@@ -167,7 +167,7 @@ class TenantMiddleware(MiddlewareMixin):
         usuario = get_usuario_from_request(request)
         if usuario and usuario.empresa:
             empresa = usuario.empresa
-            print(f"✅ Empresa encontrada por usuario: {empresa}")
+            print(f"[OK] Empresa encontrada por usuario: {empresa}")
 
         # Si no se encontró empresa por usuario, intentar por headers
         if not empresa:
@@ -175,9 +175,9 @@ class TenantMiddleware(MiddlewareMixin):
             if tenant_id:
                 try:
                     empresa = Empresa.objects.get(id=tenant_id)
-                    print(f"✅ Empresa encontrada por header: {empresa}")
+                    print(f"[OK] Empresa encontrada por header: {empresa}")
                 except Empresa.DoesNotExist:
-                    print(f"❌ No se encontró empresa con ID: {tenant_id}")
+                    print(f"[ERROR] No se encontró empresa con ID: {tenant_id}")
 
         # Asignar la empresa al request
         request.tenant = empresa
@@ -186,7 +186,7 @@ class TenantMiddleware(MiddlewareMixin):
         # Para endpoints que requieren tenant, asegurarse de que exista
         if request.path.startswith('/api/') and not request.path.startswith('/api/auth/'):
             if not empresa:
-                print("❌ Error: No se pudo determinar el tenant")
+                print("[ERROR] No se pudo determinar el tenant")
                 from django.http import JsonResponse
                 return JsonResponse({
                     'error': 'No se pudo determinar la empresa',
@@ -199,7 +199,7 @@ class TenantMiddleware(MiddlewareMixin):
                     }
                 }, status=400)
             else:
-                print(f"✅ Tenant configurado correctamente: {empresa}")
+                print(f"[OK] Tenant configurado correctamente: {empresa}")
 
         return None
 
