@@ -75,6 +75,7 @@ class TenantMiddleware:
                 '/api/auth/logout',
                 '/api/auth/me',
                 '/api/ping',
+                '/api/public/',  # Rutas públicas de SaaS (registro de empresas, Stripe, etc.)
             ]
 
             # Si la ruta requiere validación de tenant
