@@ -135,11 +135,17 @@ def db_info(request):
 
 def users_count(request):
     """
-    Cuenta de usuarios del auth de Django (tabla auth_user).
+    Cuenta de usuarios de la tabla Usuario (modelo de negocio).
+    Filtra por empresa (multi-tenancy).
     NOTA: devolvemos 'count' para cuadrar con el frontend.
     """
-    User = get_user_model()
-    return JsonResponse({"count": User.objects.count()})
+    queryset = Usuario.objects.all()
+
+    # Filtrar por tenant si está disponible
+    if hasattr(request, 'tenant') and request.tenant:
+        queryset = queryset.filter(empresa=request.tenant)
+
+    return JsonResponse({"count": queryset.count()})
 
 
 # Helper reutilizable: ¿el usuario actual es admin en la tabla de negocio?

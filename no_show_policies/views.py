@@ -220,6 +220,13 @@ class EmpresaFromRequestMixin:
         if not req:
             return None
 
+        # PRIORIDAD 1: request.tenant del TenantMiddleware
+        # Esto asegura que el multi-tenancy basado en subdominios se respete
+        tenant = getattr(req, "tenant", None)
+        if tenant and hasattr(tenant, "id"):
+            logger.debug(f"[EmpresaFromRequestMixin] Usando tenant del middleware: {tenant.nombre} (ID: {tenant.id})")
+            return tenant.id
+
         user = getattr(req, "user", None)
 
         if getattr(user, "is_authenticated", False):
