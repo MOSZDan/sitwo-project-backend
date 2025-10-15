@@ -277,7 +277,7 @@ def registrar_empresa_con_pago(request):
 
             # 8. Enviar email de bienvenida
             try:
-                dominio_base = settings.FRONTEND_URL.replace('https://', '').replace('http://', '')
+                dominio_base = settings.SAAS_BASE_DOMAIN
                 url_acceso = f"https://{empresa.subdomain}.{dominio_base}"
 
                 subject = f"¡Bienvenido a {settings.CLINIC_INFO.get('name', 'Nuestro Sistema')}!"
