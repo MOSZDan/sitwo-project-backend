@@ -30,7 +30,6 @@ ALLOWED_HOSTS = [
     "18.224.189.52",
     ".amazonaws.com",
     "ec2-18-220-214-178.us-east-2.compute.amazonaws.com",
-    "sitwo-project.onrender.com",
     "notificct.dpdns.org",
     "balancearin-1841542738.us-east-2.elb.amazonaws.com",
     ".localhost",
@@ -72,7 +71,6 @@ if DEBUG:
 else:
     # En producción, lista específica de orígenes permitidos
     CORS_ALLOWED_ORIGINS = [
-        "https://sitwo-project.onrender.com",
         "https://notificct.dpdns.org",  # Dominio público (landing page)
         # Los subdominios de tenants se manejan por el regex de arriba
         "https://norte.notificct.dpdns.org",
@@ -87,7 +85,6 @@ else:
 CORS_ALLOW_CREDENTIALS = True
 
 CSRF_TRUSTED_ORIGINS = [
-    "https://sitwo-project.onrender.com",
     "http://18.220.214.178",
     "https://18.220.214.178",
     "https://ec2-18-220-214-178.us-east-2.compute.amazonaws.com",
@@ -243,7 +240,7 @@ DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 # ------------------------------------
 # Frontend y Email (para recuperar contraseña)
 # ------------------------------------
-FRONTEND_URL = "https://sitwo-project.onrender.com"
+FRONTEND_URL = "https://buy-dental-smile.vercel.app"
 DEFAULT_FROM_EMAIL = "no-reply@clinica.local"
 
 # ------------------------------------
